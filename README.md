@@ -346,8 +346,8 @@ AIGIS is designed for:
 
 ## Documentation
 
+- [ARCHITECTURE.md](ARCHITECTURE.md) - Complete system architecture and business logic
 - [PHYSICS_MODELS.md](PHYSICS_MODELS.md) - Detailed scientific model documentation
-- [IMPLEMENTATION_STATUS.md](IMPLEMENTATION_STATUS.md) - Development status
 - [DOCKER.md](DOCKER.md) - Docker deployment guide
 
 ## Future Extensions
