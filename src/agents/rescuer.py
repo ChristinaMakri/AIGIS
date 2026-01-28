@@ -228,6 +228,40 @@ class RescuerAgent(Agent):
             # Move along path
             if len(self.current_path) > 1:
                 next_node = self.current_path[1]
+
+                # DYNAMIC RE-ROUTING: Check if next node is blocked by fire
+                node_data = environment.graph.nodes[next_node]
+                next_lat, next_lon = node_data['y'], node_data['x']
+                next_r, next_c = environment.latlon_to_grid(next_lat, next_lon)
+
+                # If next node is burning, recalculate path immediately
+                if environment.fire_grid[next_r, next_c] == 1:  # BURNING
+                    try:
+                        # Recalculate path avoiding fire
+                        self.current_path = nx.shortest_path(
+                            environment.graph,
+                            self.current_node,
+                            self.target_node,
+                            weight='length'
+                        )
+                        return  # Skip movement this step, recalculate next step
+                    except (nx.NetworkXNoPath, nx.NodeNotFound):
+                        # No safe path - abort mission
+                        self.mission_status = "ABORTED"
+                        if self.current_mission:
+                            abort_msg = Message(
+                                sender=self.agent_id,
+                                receiver=self.current_mission['commander'],
+                                performative="REFUSE",
+                                content={
+                                    'reason': 'Path blocked by fire',
+                                    'mission_id': self.current_mission['mission_id']
+                                }
+                            )
+                            self.send_message(abort_msg)
+                        return
+
+                # Path is clear, move to next node
                 self.current_node = next_node
                 self.current_path.pop(0)
 

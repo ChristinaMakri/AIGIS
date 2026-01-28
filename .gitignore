@@ -54,5 +54,15 @@ output/
 results/
 *.csv
 
+# Test results
+.pytest_cache/
+htmlcov/
+.coverage
+*.pyc
+
+# Sensitivity analysis outputs
+sensitivity_results.csv
+sensitivity_analysis.png
+
 # Claude Code
 .claude/

@@ -385,6 +385,30 @@ class CivilianAgent(Agent):
             # Move along path using Greenshields' speed (already calculated)
             if self.current_path and len(self.current_path) > 1 and self.current_speed > 0.1:
                 next_node = self.current_path[1]
+
+                # DYNAMIC RE-ROUTING: Check if next node is blocked by fire
+                node_data = environment.graph.nodes[next_node]
+                next_lat, next_lon = node_data['y'], node_data['x']
+                next_r, next_c = environment.latlon_to_grid(next_lat, next_lon)
+
+                # If next node is burning, recalculate path immediately
+                if environment.fire_grid[next_r, next_c] == 1:  # BURNING
+                    self.current_path = []  # Clear stale path
+                    try:
+                        # Find new path avoiding fire
+                        self.current_path = nx.shortest_path(
+                            environment.graph,
+                            self.current_node,
+                            self.safety_node,
+                            weight='length'
+                        )
+                    except (nx.NetworkXNoPath, nx.NodeNotFound):
+                        # If no path exists, try new safe zone
+                        self.safety_node = environment.find_nearest_safe_node(self.current_node)
+                        self.current_path = []
+                    return  # Skip movement this step, recalculate next step
+
+                # Path is clear, move to next node
                 old_node = self.current_node
                 self.current_node = next_node
                 self.current_path.pop(0)
