@@ -33,52 +33,115 @@ class AnalystAgent(Agent):
     """
 
     def __init__(self, agent_id: str, position: Tuple[float, float]):
+        """
+        Initialize Analyst agent with Rothermel fire model and fuzzy logic.
+
+        The Analyst performs scientific risk assessment by:
+        1. Calculating Rate of Spread (ROS) using Rothermel's fire spread model
+        2. Computing Time To Impact (TTI): distance_to_assets / ROS
+        3. Assessing escape route availability (bottlenecks)
+        4. Using fuzzy logic inference to determine overall risk level
+
+        Output: Risk reports sent to Commander for strategic decision making
+
+        Architecture: Model-based deductive reasoning
+        - Uses physics model (Rothermel) for fire behavior prediction
+        - Fuzzy inference handles uncertainty in risk assessment
+        - Does not execute actions, only provides intelligence
+
+        Args:
+            agent_id: Unique identifier
+            position: (latitude, longitude) position
+        """
         super().__init__(agent_id, position)
-        self.fire_reports: List[Dict] = []
-        self.risk_assessments: Dict[Tuple[int, int], float] = {}
-        self.tti_value = float('inf')  # Time to impact (meters)
-        self.ros_value = 0.0  # Rate of spread (m/s)
+
+        # ===== FIRE INTELLIGENCE DATA =====
+        self.fire_reports: List[Dict] = []  # Reports from Sentinel agents
+        self.risk_assessments: Dict[Tuple[int, int], float] = {}  # Grid position → risk
+
+        # ===== KEY METRICS =====
+        self.tti_value = float('inf')  # Time To Impact (how long until fire reaches civilians)
+        self.ros_value = 0.0  # Rate of Spread (m/s, from Rothermel model)
+
+        # ===== FUZZY LOGIC SYSTEM =====
+        # Initialize fuzzy inference system for risk assessment
+        # Inputs: TTI, escape route availability
+        # Output: Risk level (0-100)
         self._setup_fuzzy_system()
 
     def _setup_fuzzy_system(self):
         """
         Initialize fuzzy logic system for risk assessment.
-        Uses TTI (Time To Impact) and Escape Route Availability.
+
+        FUZZY LOGIC allows handling uncertainty in risk assessment by using
+        linguistic variables instead of precise thresholds. This better models
+        real-world decision-making where risks aren't binary.
+
+        INPUT 1: Time To Impact (TTI)
+        - imminent: Fire will arrive very soon (0-30 meters)
+        - near_future: Fire approaching (30-70 meters)
+        - distant: Fire is far away (70-200 meters)
+
+        INPUT 2: Escape Route Availability
+        - bottlenecked: Few exits available (0-2 exits)
+        - sufficient: Adequate exits (2+ exits)
+
+        OUTPUT: Risk Level (0-100)
+        - low (0-30): Situation under control
+        - medium (20-70): Moderate concern
+        - high (60-90): Dangerous situation
+        - critical (85-100): Immediate threat to life
+
+        FUZZY RULES (IF-THEN logic):
+        1. IF fire imminent AND routes bottlenecked THEN risk critical (MATI SCENARIO)
+        2. IF fire imminent AND routes sufficient THEN risk high
+        3. IF fire near future AND routes bottlenecked THEN risk high
+        4. IF fire near future AND routes sufficient THEN risk medium
+        5. IF fire distant THEN risk low
+        6. IF fire imminent THEN risk high (failsafe)
+
+        Reference: Rules based on analysis of Mati Fire disaster (2018) where
+        bottlenecked exits + approaching fire = critical situation
         """
-        # Input Variable 1: TTI (Time To Impact in meters)
+        # ===== INPUT VARIABLE 1: TIME TO IMPACT (TTI) =====
+        # Distance until fire reaches civilian population (meters)
         self.tti = ctrl.Antecedent(np.arange(0, 201, 1), 'tti')
         self.tti['imminent'] = fuzz.trimf(self.tti.universe, [0, 0, ANALYST_TTI_IMMINENT])
         self.tti['near_future'] = fuzz.trimf(self.tti.universe,
                                              [ANALYST_TTI_IMMINENT, ANALYST_TTI_NEAR, 150])
         self.tti['distant'] = fuzz.trimf(self.tti.universe, [ANALYST_TTI_NEAR, 200, 200])
 
-        # Input Variable 2: Escape Route Availability (number of exits)
+        # ===== INPUT VARIABLE 2: ESCAPE ROUTE AVAILABILITY =====
+        # Number of available evacuation exits
         self.routes = ctrl.Antecedent(np.arange(0, 11, 1), 'routes')
         self.routes['bottlenecked'] = fuzz.trimf(self.routes.universe,
                                                  [0, 0, ANALYST_EXIT_BOTTLENECK_THRESHOLD])
         self.routes['sufficient'] = fuzz.trimf(self.routes.universe,
                                                [ANALYST_EXIT_BOTTLENECK_THRESHOLD, 10, 10])
 
-        # Output Variable: Risk Level
+        # ===== OUTPUT VARIABLE: RISK LEVEL =====
+        # Overall risk assessment (0-100 scale)
         self.risk = ctrl.Consequent(np.arange(0, 101, 1), 'risk')
         self.risk['low'] = fuzz.trimf(self.risk.universe, [0, 0, 30])
         self.risk['medium'] = fuzz.trimf(self.risk.universe, [20, 50, 70])
         self.risk['high'] = fuzz.trimf(self.risk.universe, [60, 80, 90])
         self.risk['critical'] = fuzz.trimf(self.risk.universe, [85, 100, 100])
 
-        # Fuzzy Rules Matrix (based on Mati fire scenario)
+        # ===== FUZZY RULES (Expert Knowledge) =====
+        # These rules encode disaster management expertise
         rule1 = ctrl.Rule(self.tti['imminent'] & self.routes['bottlenecked'],
-                         self.risk['critical'])  # MATI SCENARIO
+                         self.risk['critical'])  # MATI FIRE SCENARIO: worst case
         rule2 = ctrl.Rule(self.tti['imminent'] & self.routes['sufficient'],
-                         self.risk['high'])
+                         self.risk['high'])  # Imminent but can evacuate
         rule3 = ctrl.Rule(self.tti['near_future'] & self.routes['bottlenecked'],
-                         self.risk['high'])
+                         self.risk['high'])  # Time but bottlenecked
         rule4 = ctrl.Rule(self.tti['near_future'] & self.routes['sufficient'],
-                         self.risk['medium'])
-        rule5 = ctrl.Rule(self.tti['distant'], self.risk['low'])
-        rule6 = ctrl.Rule(self.tti['imminent'], self.risk['high'])  # Any imminent threat is high
+                         self.risk['medium'])  # Manageable situation
+        rule5 = ctrl.Rule(self.tti['distant'], self.risk['low'])  # Fire far away
+        rule6 = ctrl.Rule(self.tti['imminent'], self.risk['high'])  # Failsafe: imminent = high risk
 
-        # Control system
+        # ===== CONTROL SYSTEM =====
+        # Combines all rules using fuzzy inference
         self.risk_ctrl = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5, rule6])
         self.risk_simulation = ctrl.ControlSystemSimulation(self.risk_ctrl)
 

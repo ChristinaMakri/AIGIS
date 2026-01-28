@@ -31,23 +31,57 @@ class RescuerAgent(Agent):
 
     def __init__(self, agent_id: str, position: Tuple[float, float],
                  max_speed: float = RESCUER_MAX_SPEED):
+        """
+        Initialize Rescuer agent with goal-based practical reasoning architecture.
+
+        Rescuers participate in Contract Net Protocol (CNP) to bid on rescue missions:
+        1. Commander sends CFP (Call For Proposal) with mission details
+        2. Rescuers assess path risk and calculate bid cost
+        3. Commander selects best proposal (lowest cost)
+        4. Selected rescuer executes mission with dynamic re-routing
+
+        SAFETY PROTOCOL: Rescuers REFUSE missions through active fire zones.
+        This simulates professional safety standards where rescuers won't
+        enter zones that risk their own lives.
+
+        Bid Calculation:
+        Cost = (Distance/Speed) + (Risk_path × α) + (100 - Fuel)
+
+        Where:
+        - Distance/Speed: Estimated time to arrival (ETA)
+        - Risk_path: Maximum temperature along planned path
+        - α: Risk penalty weight (higher α = more risk-averse)
+        - 100 - Fuel: Fuel penalty (low fuel = higher cost)
+
+        Args:
+            agent_id: Unique identifier
+            position: (latitude, longitude) position
+            max_speed: Maximum movement speed (grid cells per step)
+        """
         super().__init__(agent_id, position)
-        self.max_speed = max_speed
-        self.fuel = RESCUER_FUEL_CAPACITY
-        self.current_mission: Optional[Dict] = None
-        self.current_path: List[int] = []
-        self.current_node: Optional[int] = None
-        self.target_node: Optional[int] = None
-        self.mission_status = "IDLE"  # IDLE, MOVING, ARRIVED
 
-        # Risk assessment parameters
-        self.risk_alpha = RESCUER_RISK_ALPHA
-        self.safety_threshold = RESCUER_SAFETY_THRESHOLD
+        # ===== MOVEMENT PARAMETERS =====
+        self.max_speed = max_speed  # Movement speed for ETA calculations
+        self.fuel = RESCUER_FUEL_CAPACITY  # Resource constraint
 
-        # Performance Optimization: Staggered Pathfinding
-        self.path_recalc_interval = RESCUER_PATH_RECALC_INTERVAL
-        self.steps_since_recalc = 0
-        self.recalc_offset = np.random.randint(0, self.path_recalc_interval)  # Random offset
+        # ===== MISSION STATE =====
+        self.current_mission: Optional[Dict] = None  # Active mission details
+        self.current_path: List[int] = []  # Planned path (node IDs)
+        self.current_node: Optional[int] = None  # Current graph node
+        self.target_node: Optional[int] = None  # Mission target node
+        self.mission_status = "IDLE"  # IDLE, MOVING, ARRIVED, ABORTED
+
+        # ===== RISK ASSESSMENT PARAMETERS =====
+        # Rescuer scans temperature grid along path to assess danger
+        self.risk_alpha = RESCUER_RISK_ALPHA  # Risk penalty weight in bid
+        self.safety_threshold = RESCUER_SAFETY_THRESHOLD  # Refuse if path risk > this
+
+        # ===== PERFORMANCE OPTIMIZATION: STAGGERED PATHFINDING =====
+        # Recalculate A* path periodically (not every step) to reduce CPU load
+        # Random offset prevents all rescuers from recalculating simultaneously
+        self.path_recalc_interval = RESCUER_PATH_RECALC_INTERVAL  # Steps between recalcs
+        self.steps_since_recalc = 0  # Counter
+        self.recalc_offset = np.random.randint(0, self.path_recalc_interval)  # Random phase
 
     def perceive(self, environment) -> None:
         """Receive CFPs and mission assignments"""
@@ -66,22 +100,46 @@ class RescuerAgent(Agent):
 
     def _assess_path_risk(self, path: List[int], environment) -> float:
         """
-        Assess risk along the planned path by scanning temperature grid.
+        Assess risk along planned rescue path by scanning temperature grid.
+
+        CRITICAL SAFETY CHECK: This prevents rescuers from attempting missions
+        through active fire zones. Scans each node in the planned path and
+        returns the maximum temperature encountered.
+
+        Risk Assessment:
         Risk_path = max(Temperature_node) for all nodes in path
+
+        If Risk_path > Safety_Threshold (70°C):
+        → REFUSE mission (too dangerous)
+
+        If Risk_path ≤ Safety_Threshold:
+        → Include risk in bid calculation as penalty
+
+        This implements professional rescue protocol where personnel safety
+        is paramount. Rescuers won't accept suicide missions.
+
+        Args:
+            path: List of graph node IDs representing planned route
+            environment: Environment with temperature_grid
+
+        Returns:
+            Maximum temperature (°C) along the path
         """
         max_risk = 0.0
 
+        # Scan each node in the planned path
         for node in path:
-            # Get node position
+            # Get node geographic position
             node_data = environment.graph.nodes[node]
             lat, lon = node_data['y'], node_data['x']
 
-            # Convert to grid coordinates
+            # Convert to grid coordinates for temperature lookup
             row, col = environment.latlon_to_grid(lat, lon)
 
             # Check temperature at this location
             temp = environment.temperature_grid[row, col]
 
+            # Track maximum temperature (worst-case risk)
             if temp > max_risk:
                 max_risk = temp
 
