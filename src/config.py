@@ -8,16 +8,19 @@ import numpy as np
 # SIMULATION SETTINGS
 # =============================================================================
 
-# Random Seed (for reproducibility in Monte Carlo)
+# Random Seed (for reproducibility in Monte Carlo experiments)
+# Set to None for non-deterministic behavior
 RANDOM_SEED = 42
 
 # Simulation Duration
-MAX_STEPS = 500
-STEP_DELAY = 0.1  # seconds (GUI mode only)
+MAX_STEPS = 500  # Maximum simulation steps (prevents infinite loops)
+STEP_DELAY = 0.1  # seconds between steps (GUI mode only, for visualization)
 
-# Grid Configuration
-GRID_WIDTH = 200
-GRID_HEIGHT = 200
+# Grid Configuration (Cellular Automata Resolution)
+# Larger grids = more spatial detail but slower performance
+# Trade-off: 100×100 is fast, 200×200 is detailed
+GRID_WIDTH = 200   # Grid columns
+GRID_HEIGHT = 200  # Grid rows
 
 # =============================================================================
 # MAP CONFIGURATION (Location-Agnostic)
@@ -97,12 +100,15 @@ NUM_CIVILIANS = 20
 # =============================================================================
 # SENTINEL AGENT (Signal Detection Theory)
 # =============================================================================
+# Sentinel agents are fire detection sensors with environmental signal attenuation
+# Signal equation: I_detected = I_actual/(d² + ε) × (1 + cos(θ)) + N(0,σ)
+# Where: d = distance, θ = wind angle, σ = noise
 
-SENTINEL_DETECTION_RADIUS = 30  # grid cells
-SENTINEL_SIGNAL_EPSILON = 1.0  # Prevents division by zero
-SENTINEL_NOISE_SIGMA = 5.0  # Gaussian noise std dev
-SENTINEL_TRIGGER_THRESHOLD = 15.0  # Intensity threshold
-SENTINEL_DEBOUNCE_STEPS = 3  # Must detect for N consecutive steps
+SENTINEL_DETECTION_RADIUS = 30  # grid cells (spatial optimization: O(R²) scan)
+SENTINEL_SIGNAL_EPSILON = 1.0  # Prevents division by zero in signal equation
+SENTINEL_NOISE_SIGMA = 5.0  # Gaussian noise std dev (environmental noise)
+SENTINEL_TRIGGER_THRESHOLD = 15.0  # Intensity threshold for fire alert
+SENTINEL_DEBOUNCE_STEPS = 3  # Must detect for N consecutive steps (prevents false alarms)
 
 # =============================================================================
 # ANALYST AGENT (Fuzzy Logic)
@@ -119,56 +125,90 @@ ANALYST_RISK_RANGE = (0, 100)
 ANALYST_WIND_CHANGE_THRESHOLD = 5.0  # degrees (re-evaluate if wind shifts > 5°)
 
 # =============================================================================
-# COMMANDER AGENT (ECT vs TTI)
+# COMMANDER AGENT (ECT vs TTI Decision Protocol)
 # =============================================================================
+# Commander uses Evacuation Clearance Time (ECT) vs Time To Impact (TTI)
+# to determine evacuation phase
+#
+# ECT = (N_agents / C_exit) × γ_congestion  [How long to evacuate everyone]
+# TTI = Distance_to_fire / ROS               [How long until fire arrives]
+#
+# Decision Logic:
+# - TTI > 2.5×ECT → Phase 0: Monitoring (plenty of time)
+# - TTI > 1.5×ECT → Phase 1: Pre-Alert (prepare to evacuate)
+# - TTI > 1.0×ECT → Phase 2: Mass Evacuation (evacuate now!)
+# - TTI ≤ ECT     → Phase 3: Shelter-in-Place (too late, seek nearest safe zone)
 
-COMMANDER_EXIT_CAPACITY = 10  # agents per minute per exit
-COMMANDER_CONGESTION_FACTOR_BASE = 1.0
-COMMANDER_REEVALUATION_INTERVAL = 10  # steps
+COMMANDER_EXIT_CAPACITY = 10  # agents per minute per exit (bottleneck capacity)
+COMMANDER_CONGESTION_FACTOR_BASE = 1.0  # Congestion multiplier (increases with density)
+COMMANDER_REEVALUATION_INTERVAL = 10  # steps (periodic re-assessment of situation)
 
-# Phase Multipliers
-COMMANDER_PHASE_MONITOR_MULTIPLIER = 2.5  # TTI > 2.5 × ECT
-COMMANDER_PHASE_PREALERT_MULTIPLIER = 1.5  # TTI > 1.5 × ECT
-COMMANDER_PHASE_EVACUATE_MULTIPLIER = 1.0  # TTI > 1.0 × ECT
-# Phase Shelter: TTI <= ECT (too late to evacuate)
+# Phase Multipliers (thresholds for phase transitions)
+COMMANDER_PHASE_MONITOR_MULTIPLIER = 2.5   # TTI > 2.5 × ECT: Monitoring
+COMMANDER_PHASE_PREALERT_MULTIPLIER = 1.5  # TTI > 1.5 × ECT: Pre-Alert
+COMMANDER_PHASE_EVACUATE_MULTIPLIER = 1.0  # TTI > 1.0 × ECT: Mass Evacuation
+# Phase 3 (Shelter): TTI ≤ ECT (too late to evacuate safely)
 
 # =============================================================================
-# RESCUER AGENT (Risk-Adjusted Bidding)
+# RESCUER AGENT (Risk-Adjusted Bidding via Contract Net Protocol)
 # =============================================================================
+# Rescuers respond to Commander's Call For Proposals (CFP) for rescue missions
+# Bid Calculation: Cost = (Distance/V) + (Risk_path × α) + (100 - Fuel)
+# Safety Protocol: REFUSE missions if Risk_path > Safety_Threshold
+#
+# This implements goal-based architecture with practical reasoning:
+# - Assess path risk by scanning temperature grid along route
+# - Refuse dangerous missions (professional safety protocol)
+# - Dynamic re-routing if path becomes blocked by fire
 
-RESCUER_MAX_SPEED = 3.0  # grid cells per step
-RESCUER_PATH_RECALC_INTERVAL = 20  # Recalculate path every N steps (performance optimization)
-RESCUER_FUEL_CAPACITY = 100
-RESCUER_RISK_ALPHA = 50.0  # Risk penalty weight
-RESCUER_SAFETY_THRESHOLD = 70.0  # Temperature threshold (refuse if path > this)
+RESCUER_MAX_SPEED = 3.0  # grid cells per step (rescue vehicle speed)
+RESCUER_PATH_RECALC_INTERVAL = 20  # Recalculate path every N steps (staggered pathfinding)
+RESCUER_FUEL_CAPACITY = 100  # Resource constraint
+RESCUER_RISK_ALPHA = 50.0  # Risk penalty weight in bid calculation (higher = more risk-averse)
+RESCUER_SAFETY_THRESHOLD = 70.0  # Temperature threshold (°C) - refuse if path exceeds this
 
 # =============================================================================
-# CIVILIAN AGENT (Greenshields + Social Force)
+# CIVILIAN AGENT (Greenshields Traffic + Social Force Herding + BDI Architecture)
 # =============================================================================
+# Most complex agent with realistic crowd dynamics and panic psychology
+#
+# Traffic Model: V = V_free × (1 - ρ_local / ρ_jam)
+#   - Speed decreases linearly with local density
+#   - Gridlock occurs when density reaches jam density (V → 0)
+#
+# Panic Equation: Panic(t) = Panic(t-1) + α×(1/d_fire) + β×(family) - decay
+#   - Increases with fire proximity (inverse distance)
+#   - Increases if family is separated
+#   - Decays slowly when no fire visible
+#
+# 3-State Cognitive Machine:
+#   - Rational (< 0.4): Optimal A* pathfinding, full speed
+#   - Confused (0.4-0.7): 50% speed, frequent re-routing
+#   - Herding (≥ 0.7): Follows crowd (Social Force), ignores optimal path
 
-# Greenshields Traffic Model
-CIVILIAN_V_FREE_FLOW = 2.0  # Free flow speed
-CIVILIAN_RHO_JAM = 5.0  # Jam density (agents per edge)
+# ===== Greenshields Traffic Model Parameters =====
+CIVILIAN_V_FREE_FLOW = 2.0  # Maximum speed when road is empty (grid cells/step)
+CIVILIAN_RHO_JAM = 5.0  # Jam density: agents per edge (gridlock threshold)
 
-# Panic Model
-CIVILIAN_PANIC_ALPHA = 0.05  # Fire distance coefficient
-CIVILIAN_PANIC_BETA = 0.2  # Family separation penalty
-CIVILIAN_PANIC_DECAY = 0.01  # Decay when no fire visible
+# ===== Panic Model Parameters =====
+CIVILIAN_PANIC_ALPHA = 0.05  # Fire distance coefficient (inverse relationship)
+CIVILIAN_PANIC_BETA = 0.2  # Family separation penalty (constant stress)
+CIVILIAN_PANIC_DECAY = 0.01  # Decay rate when no fire visible (calming down)
 
-# Cognitive Thresholds
-CIVILIAN_PANIC_RATIONAL = 0.4  # Below: rational
-CIVILIAN_PANIC_CONFUSED = 0.7  # Below: confused
-CIVILIAN_PANIC_HERDING = 0.8  # Above: herding (social force)
+# ===== Cognitive State Thresholds =====
+CIVILIAN_PANIC_RATIONAL = 0.4  # Below: Rational behavior (optimal decisions)
+CIVILIAN_PANIC_CONFUSED = 0.7  # Below: Confused behavior (degraded performance)
+CIVILIAN_PANIC_HERDING = 0.8  # Above: Herding behavior (follows crowd)
 
-# Speed Modifiers
-CIVILIAN_CONFUSED_SPEED_FACTOR = 0.5  # 50% speed when confused
+# ===== Speed Modifiers =====
+CIVILIAN_CONFUSED_SPEED_FACTOR = 0.5  # 50% speed reduction when confused (hesitation)
 
-# Social Force Model (Herding)
-CIVILIAN_VISION_RADIUS = 10  # Grid cells for seeing neighbors
-CIVILIAN_HERDING_INFLUENCE = 0.7  # Weight of neighbor average direction
+# ===== Social Force Model (Herding) =====
+CIVILIAN_VISION_RADIUS = 10  # Grid cells for seeing other agents
+CIVILIAN_HERDING_INFLUENCE = 0.7  # Weight of crowd direction (0=ignore, 1=fully follow)
 
-# Performance Optimization
-CIVILIAN_PATH_RECALC_INTERVAL = 20  # Recalculate path every N steps (staggered pathfinding)
+# ===== Performance Optimization =====
+CIVILIAN_PATH_RECALC_INTERVAL = 20  # Recalculate A* path every N steps (staggered)
 
 # =============================================================================
 # MONTE CARLO / BATCH MODE

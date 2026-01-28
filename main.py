@@ -50,15 +50,31 @@ def run_monte_carlo(lat: float, lon: float, radius: float,
     """
     Run Monte Carlo experiments (N iterations) and export results to CSV.
 
+    Monte Carlo simulation runs the same scenario multiple times with different
+    random seeds to assess statistical variability. This is critical for stochastic
+    simulations where outcomes depend on random fire ignition, agent decisions, etc.
+
+    Process:
+    1. Run N independent simulations with same initial conditions
+    2. Collect metrics from each run (casualties, evacuations, panic levels)
+    3. Export to CSV for statistical analysis
+    4. Print summary statistics (mean ± std, min/max)
+
+    Use Cases:
+    - Sensitivity analysis (vary panic thresholds, agent counts, etc.)
+    - Validation of evacuation strategies
+    - Statistical significance testing
+    - Research publications requiring reproducible results
+
     Args:
-        lat: Center latitude
+        lat: Center latitude (location-agnostic, works anywhere)
         lon: Center longitude
-        radius: Map radius in meters
-        num_runs: Number of simulation runs
+        radius: Map radius in meters (larger = more area but slower)
+        num_runs: Number of simulation runs (typical: 10-100 for quick tests, 100-1000 for research)
         output_file: Output CSV file path
 
     Returns:
-        DataFrame with all results
+        DataFrame with all results (columns: run_id, steps, casualties, evacuated, etc.)
     """
     print("=" * 70)
     print("🧪 MONTE CARLO BATCH MODE")
@@ -71,15 +87,17 @@ def run_monte_carlo(lat: float, lon: float, radius: float,
 
     results_list = []
 
+    # Run N independent simulations
     for run_id in range(num_runs):
         print(f"\n🔬 Run {run_id + 1}/{num_runs}")
         print("-" * 70)
 
-        # Run simulation
+        # Each run uses a different random seed for variability
+        # Simulation runs in headless mode (no GUI) for speed
         sim = AIGISSimulation(lat, lon, radius, mode='batch')
         result = sim.run_until_complete()
 
-        # Add run ID
+        # Add metadata to results
         result['run_id'] = run_id
         result['lat'] = lat
         result['lon'] = lon
@@ -87,15 +105,15 @@ def run_monte_carlo(lat: float, lon: float, radius: float,
 
         results_list.append(result)
 
-        # Print summary
+        # Print summary for this run
         print(f"  ✅ Complete: {result['steps']} steps, "
               f"{result['casualties']} casualties, "
               f"{result['evacuated']} evacuated")
 
-    # Convert to DataFrame
+    # Convert to pandas DataFrame for easy analysis
     df = pd.DataFrame(results_list)
 
-    # Save to CSV
+    # Save to CSV for external analysis (Excel, R, Python notebooks, etc.)
     df.to_csv(output_file, index=False)
     print(f"\n💾 Results saved to: {output_file}")
 
@@ -106,8 +124,17 @@ def print_statistics(df: pd.DataFrame) -> None:
     """
     Print summary statistics from Monte Carlo results.
 
+    Calculates and displays:
+    - Mean ± Standard Deviation (measure of central tendency and spread)
+    - Min and Max (range of outcomes)
+
+    Statistical Interpretation:
+    - Low std dev: Consistent outcomes across runs
+    - High std dev: High variability (sensitive to random factors)
+    - Range (max-min): Worst-case vs best-case scenarios
+
     Args:
-        df: DataFrame with Monte Carlo results
+        df: DataFrame with Monte Carlo results (from run_monte_carlo)
     """
     print("\n" + "=" * 70)
     print("📊 MONTE CARLO SUMMARY STATISTICS")

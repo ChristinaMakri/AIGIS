@@ -37,67 +37,110 @@ class CivilianAgent(Agent):
     """
 
     def __init__(self, agent_id: str, position: Tuple[float, float]):
+        """
+        Initialize a civilian agent with BDI architecture and panic psychology.
+
+        Key Features:
+        - Greenshields traffic model: Speed decreases with crowd density
+        - 3-state cognitive machine: Rational → Confused → Herding
+        - Panic equation: Increases with fire proximity and family separation
+        - Social force herding: Follows crowd at high panic levels
+
+        Args:
+            agent_id: Unique identifier for the agent
+            position: Initial (latitude, longitude) position
+        """
         super().__init__(agent_id, position)
 
-        # Traffic Model Parameters
-        self.v_free_flow = CIVILIAN_V_FREE_FLOW
-        self.rho_jam = CIVILIAN_RHO_JAM
-        self.current_speed = self.v_free_flow
+        # ===== GREENSHIELDS TRAFFIC MODEL PARAMETERS =====
+        # V_current = V_free × (1 - ρ_local / ρ_jam)
+        # When density reaches jam density, speed → 0 (gridlock)
+        self.v_free_flow = CIVILIAN_V_FREE_FLOW  # Maximum speed when road is empty
+        self.rho_jam = CIVILIAN_RHO_JAM  # Jam density (agents per edge)
+        self.current_speed = self.v_free_flow  # Current actual speed
 
-        # BDI Components
-        self.beliefs: Set[str] = set()  # Known facts
-        self.desires: List[str] = ['survive', 'reach_safety']
-        self.intentions: List[str] = []  # Current plan
+        # ===== BDI ARCHITECTURE COMPONENTS =====
+        # Beliefs: Knowledge about the world (updated via perception)
+        # Desires: Goals the agent wants to achieve (fixed: survive)
+        # Intentions: Committed plans to achieve desires (current path)
+        self.beliefs: Set[str] = set()  # Known facts ('warning_received', 'fire_nearby', etc.)
+        self.desires: List[str] = ['survive', 'reach_safety']  # High-level goals
+        self.intentions: List[str] = []  # Current active plan
 
-        # Panic Model (Enhanced)
-        self.panic_level = 0.0  # 0.0 to 1.0
-        self.fire_visible = False
-        self.fire_distance = float('inf')  # Distance to nearest fire
-        self.cognitive_state = "rational"  # rational, confused, herding
+        # ===== PANIC MODEL (Distance-based with Family Factor) =====
+        # Panic(t) = Panic(t-1) + α×(1/d_fire) + β×(family_separated) - decay
+        # Drives the 3-state cognitive machine: rational → confused → herding
+        self.panic_level = 0.0  # Range: 0.0 (calm) to 1.0 (extreme panic)
+        self.fire_visible = False  # Whether agent can see fire within vision radius
+        self.fire_distance = float('inf')  # Distance to nearest visible fire (meters)
+        self.cognitive_state = "rational"  # Current cognitive state: rational|confused|herding
 
-        # Navigation
-        self.current_node: Optional[int] = None
-        self.safety_node: Optional[int] = None
-        self.current_path: List[int] = []
-        self.current_edge_density = 0.0  # Local density on current edge
-        self.evacuation_ordered = False
-        self.redirect_to_coast = False
+        # ===== NAVIGATION STATE =====
+        # Uses A* pathfinding on OpenStreetMap road network
+        self.current_node: Optional[int] = None  # Current graph node
+        self.safety_node: Optional[int] = None  # Target safe zone node
+        self.current_path: List[int] = []  # Planned path (list of node IDs)
+        self.current_edge_density = 0.0  # Local agent density on current edge (for Greenshields)
+        self.evacuation_ordered = False  # Commander ordered evacuation
+        self.redirect_to_coast = False  # Shelter-in-place order (Phase 3)
 
-        # Social bonds
+        # ===== SOCIAL BONDS (Psychology Factor) =====
+        # 30% of civilians have family, adding panic when separated
+        # Based on real disaster psychology: family separation increases irrational behavior
         self.has_family = np.random.random() < 0.3
         self.family_separated = self.has_family  # Assume separated at start
 
-        # Vision and herding (Social Force Model)
-        self.vision_radius = CIVILIAN_VISION_RADIUS
-        self.nearby_agents = []  # For herding behavior
-        self.last_movement = None  # Track movement direction for others to follow
+        # ===== SOCIAL FORCE MODEL (Herding Behavior) =====
+        # At high panic (>0.7), agent follows crowd instead of optimal path
+        # Can lead to stampedes and movement toward dead ends (realistic tragedy scenario)
+        self.vision_radius = CIVILIAN_VISION_RADIUS  # Grid cells for seeing other agents
+        self.nearby_agents = []  # Nearby civilians to follow when herding
+        self.last_movement = None  # Direction vector for others to follow
 
-        # Performance Optimization: Staggered Pathfinding
-        self.path_recalc_interval = CIVILIAN_PATH_RECALC_INTERVAL
-        self.steps_since_recalc = 0
-        self.recalc_offset = np.random.randint(0, self.path_recalc_interval)  # Random offset
+        # ===== PERFORMANCE OPTIMIZATION: STAGGERED PATHFINDING =====
+        # Only recalculate A* path every N=20 steps + random offset
+        # Prevents all agents from recalculating simultaneously (CPU spike)
+        # Random offset spreads computational load across steps
+        self.path_recalc_interval = CIVILIAN_PATH_RECALC_INTERVAL  # Steps between recalcs
+        self.steps_since_recalc = 0  # Counter for tracking when to recalculate
+        self.recalc_offset = np.random.randint(0, self.path_recalc_interval)  # Random phase offset
 
     def perceive(self, environment) -> None:
         """
-        Update beliefs based on perceptions.
-        Calculate panic using distance-based equation.
+        BDI Perception: Update beliefs based on environment and messages.
+
+        Perception includes:
+        1. Processing Commander messages (warnings, evacuation orders)
+        2. Scanning for visible fire within vision radius
+        3. Calculating distance-based panic with family separation factor
+        4. Updating cognitive state based on panic thresholds
+
+        Panic Equation:
+        Panic(t) = Panic(t-1) + α×(1/d_fire) + β×(family_separated) - decay
+        Where:
+        - α: Fire distance coefficient (closer fire = higher panic increase)
+        - β: Family separation penalty (adds constant stress)
+        - decay: Gradual reduction when no fire visible
         """
-        # Update beliefs from messages
+        # ===== PROCESS MESSAGES (Commander → Civilian Communication) =====
         for message in self.messages_inbox:
+            # Pre-Evacuation Warning (Phase 1): Commander alerts of approaching fire
             if message.performative == "INFORM" and message.content.get('type') == 'WARNING':
                 self.beliefs.add('warning_received')
-                self.panic_level = min(1.0, self.panic_level + 0.1)
+                self.panic_level = min(1.0, self.panic_level + 0.1)  # Small panic increase
 
+            # Evacuation Orders (Phase 2): Commander orders mass evacuation
             elif message.performative == "REQUEST":
                 msg_type = message.content.get('type')
                 if msg_type == 'EVACUATE':
                     self.beliefs.add('evacuation_ordered')
                     self.evacuation_ordered = True
-                    self.panic_level = min(1.0, self.panic_level + 0.3)
+                    self.panic_level = min(1.0, self.panic_level + 0.3)  # Significant panic increase
 
+                # Shelter-in-Place (Phase 3): Too late to evacuate, seek nearest safe zone
                 elif msg_type == 'REDIRECT_TO_SAFE_ZONE':
                     self.beliefs.add('shelter_in_place')
-                    self.redirect_to_coast = True  # Flag to re-route
+                    self.redirect_to_coast = True  # Flag to re-route to nearest safe zone
                     self.panic_level = min(1.0, self.panic_level + 0.5)  # High panic!
 
         # Check for visible fire and calculate distance
@@ -117,60 +160,123 @@ class CivilianAgent(Agent):
 
     def _check_fire_visibility_and_distance(self, environment) -> None:
         """
-        Check if fire is visible and calculate distance to nearest fire.
-        Used in panic equation.
+        Scan environment for visible fire and calculate distance to nearest burning cell.
+
+        Used in panic equation: closer fire → higher panic increase.
+        Vision limited to CIVILIAN_VISION_RADIUS to simulate realistic line-of-sight.
+
+        Note: This is a simplified perception model. Real-world perception would include:
+        - Smoke obscuring vision
+        - Buildings blocking line of sight
+        - Hearing/smelling fire beyond visual range
         """
+        # Reset fire perception
         self.fire_visible = False
         self.fire_distance = float('inf')
 
+        # Safety check: agent not yet placed on grid
         if self.grid_position is None:
             return
 
         row, col = self.grid_position
         fire_grid = environment.fire_grid
 
-        # Scan within vision radius
+        # Scan square area within vision radius
+        # PERFORMANCE NOTE: This is O(R²) per agent, but R is small (10 cells)
+        # For large-scale simulations, consider spatial indexing
         for dr in range(-self.vision_radius, self.vision_radius + 1):
             for dc in range(-self.vision_radius, self.vision_radius + 1):
                 r, c = row + dr, col + dc
+
+                # Check grid bounds
                 if 0 <= r < fire_grid.shape[0] and 0 <= c < fire_grid.shape[1]:
-                    if fire_grid[r, c] == 1:  # Burning
+                    # Check if cell is burning (state = 1)
+                    if fire_grid[r, c] == 1:
                         self.fire_visible = True
+
+                        # Calculate Euclidean distance in grid cells
                         dist = np.sqrt(dr**2 + dc**2)
+
+                        # Track nearest fire
                         if dist < self.fire_distance:
                             self.fire_distance = dist
 
     def _update_panic(self) -> None:
         """
-        Update panic level using the panic equation.
-        Panic(t) = Panic(t-1) + α * (1/d_fire) + β * (Family_Separated?)
-        Decays slowly when fire is not visible.
+        Update panic level using distance-based panic equation.
+
+        Panic Equation:
+        Panic(t) = Panic(t-1) + α × (1/d_fire) + β × (family_separated) - decay
+
+        Components:
+        - α × (1/d_fire): Inverse relationship with fire distance
+          - Closer fire causes exponential panic increase
+          - Example: d=1 → +0.05, d=2 → +0.025, d=10 → +0.005
+        - β × (family_separated): Constant penalty if family is separated
+          - Adds psychological stress factor
+        - decay: Gradual panic reduction when no fire visible
+          - Simulates calming down over time
+
+        Panic Range: [0.0, 1.0]
+        - 0.0: Completely calm
+        - 0.4: Rational threshold (below = optimal decision making)
+        - 0.7: Confused threshold (below = degraded decision making)
+        - 0.8+: Herding threshold (follows crowd, abandons planning)
+
+        Reference: Disaster psychology research shows proximity to threat
+        and family concerns are primary panic drivers.
         """
         if self.fire_visible and self.fire_distance < float('inf'):
-            # Increase panic based on fire proximity
+            # ===== FIRE PROXIMITY FACTOR =====
+            # Inverse distance: closer fire = higher panic
+            # max(distance, 0.5) prevents division by very small numbers
             panic_increase = CIVILIAN_PANIC_ALPHA * (1.0 / max(self.fire_distance, 0.5))
             self.panic_level = min(1.0, self.panic_level + panic_increase)
         else:
-            # Decay panic when no fire visible
+            # ===== PANIC DECAY =====
+            # When no fire visible, panic gradually decreases
+            # Simulates calming down when threat is not immediate
             self.panic_level = max(0.0, self.panic_level - CIVILIAN_PANIC_DECAY)
 
-        # Family separation factor
+        # ===== FAMILY SEPARATION FACTOR =====
+        # If agent has family and they are separated, add constant stress
+        # This simulates psychological burden of not knowing if family is safe
+        # Reference: Family separation is a major stressor in disaster evacuation
         if self.family_separated:
             self.panic_level = min(1.0, self.panic_level + CIVILIAN_PANIC_BETA * 0.1)
 
     def _update_cognitive_state(self) -> None:
         """
-        Determine cognitive state based on panic level.
-        State 1: Rational (Panic < 0.4)
-        State 2: Confused (0.4 <= Panic < 0.7)
-        State 3: Herding (Panic >= 0.7)
+        3-State Cognitive Machine: Maps panic level to decision-making quality.
+
+        STATE 1: RATIONAL (Panic < 0.4)
+        - Optimal decision making
+        - Uses A* pathfinding to nearest safe zone
+        - Considers traffic conditions (Greenshields model)
+        - Full speed when road is clear
+
+        STATE 2: CONFUSED (0.4 ≤ Panic < 0.7)
+        - Degraded decision making
+        - 50% speed reduction (hesitation, indecision)
+        - Frequent path recalculation (second-guessing)
+        - May change direction erratically
+
+        STATE 3: HERDING (Panic ≥ 0.7)
+        - Abandons rational planning
+        - Follows nearby agents using Social Force Model
+        - Can lead to stampedes and dead-end traps
+        - Realistic tragedy scenario (e.g., Mati Fire 2018)
+
+        Reference: Disaster psychology shows panic impairs decision quality
+        progressively. At extreme panic, individuals follow the crowd even
+        when it leads to danger (documented in multiple disasters).
         """
         if self.panic_level < CIVILIAN_PANIC_RATIONAL:
-            self.cognitive_state = "rational"
+            self.cognitive_state = "rational"  # Below 0.4: optimal behavior
         elif self.panic_level < CIVILIAN_PANIC_CONFUSED:
-            self.cognitive_state = "confused"
+            self.cognitive_state = "confused"  # 0.4-0.7: degraded performance
         else:
-            self.cognitive_state = "herding"
+            self.cognitive_state = "herding"  # Above 0.7: follows crowd
 
     def _assess_local_density(self, environment) -> None:
         """
