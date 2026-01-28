@@ -1,0 +1,27 @@
+version: '3.8'
+
+services:
+  aigis:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: aigis-simulation
+    image: aigis:latest
+    volumes:
+      # Mount output directory to save visualization
+      - ./output:/app/output
+      # Mount source for development (optional - uncomment to enable hot reload)
+      # - ./src:/app/src
+      # - ./main.py:/app/main.py
+    environment:
+      # Use non-interactive matplotlib backend
+      - MPLBACKEND=Agg
+      # Prevent Python from buffering output
+      - PYTHONUNBUFFERED=1
+    # For X11 forwarding (Linux with GUI)
+    # Uncomment these lines if you want real-time visualization on Linux
+    # network_mode: host
+    # environment:
+    #   - DISPLAY=${DISPLAY}
+    # volumes:
+    #   - /tmp/.X11-unix:/tmp/.X11-unix:rw

@@ -1,0 +1,226 @@
+"""
+Analyst Agent - Model-Based / Deductive Architecture
+Uses Rothermel's Fire Spread Model + Fuzzy Logic for risk assessment
+Implements Time To Impact (TTI) and escape route analysis
+"""
+import numpy as np
+import skfuzzy as fuzz
+from skfuzzy import control as ctrl
+from typing import List, Dict, Tuple
+from .base_agent import Agent
+from ..message import Message
+from ..config import (
+    ROTHERMEL_BASE_ROS,
+    ROTHERMEL_WIND_C,
+    ROTHERMEL_WIND_B,
+    ANALYST_TTI_IMMINENT,
+    ANALYST_TTI_NEAR,
+    ANALYST_EXIT_BOTTLENECK_THRESHOLD,
+    WIND_SPEED,
+    WIND_DIRECTION
+)
+
+
+class AnalystAgent(Agent):
+    """
+    Model-based agent that performs risk assessment using Rothermel + Fuzzy Logic.
+
+    Architecture: Deductive Reasoning
+    - Calculates Rate of Spread (ROS) using Rothermel's model
+    - Computes Time To Impact (TTI)
+    - Assesses escape route availability
+    - Uses fuzzy inference for final risk calculation
+    """
+
+    def __init__(self, agent_id: str, position: Tuple[float, float]):
+        super().__init__(agent_id, position)
+        self.fire_reports: List[Dict] = []
+        self.risk_assessments: Dict[Tuple[int, int], float] = {}
+        self.tti_value = float('inf')  # Time to impact (meters)
+        self.ros_value = 0.0  # Rate of spread (m/s)
+        self._setup_fuzzy_system()
+
+    def _setup_fuzzy_system(self):
+        """
+        Initialize fuzzy logic system for risk assessment.
+        Uses TTI (Time To Impact) and Escape Route Availability.
+        """
+        # Input Variable 1: TTI (Time To Impact in meters)
+        self.tti = ctrl.Antecedent(np.arange(0, 201, 1), 'tti')
+        self.tti['imminent'] = fuzz.trimf(self.tti.universe, [0, 0, ANALYST_TTI_IMMINENT])
+        self.tti['near_future'] = fuzz.trimf(self.tti.universe,
+                                             [ANALYST_TTI_IMMINENT, ANALYST_TTI_NEAR, 150])
+        self.tti['distant'] = fuzz.trimf(self.tti.universe, [ANALYST_TTI_NEAR, 200, 200])
+
+        # Input Variable 2: Escape Route Availability (number of exits)
+        self.routes = ctrl.Antecedent(np.arange(0, 11, 1), 'routes')
+        self.routes['bottlenecked'] = fuzz.trimf(self.routes.universe,
+                                                 [0, 0, ANALYST_EXIT_BOTTLENECK_THRESHOLD])
+        self.routes['sufficient'] = fuzz.trimf(self.routes.universe,
+                                               [ANALYST_EXIT_BOTTLENECK_THRESHOLD, 10, 10])
+
+        # Output Variable: Risk Level
+        self.risk = ctrl.Consequent(np.arange(0, 101, 1), 'risk')
+        self.risk['low'] = fuzz.trimf(self.risk.universe, [0, 0, 30])
+        self.risk['medium'] = fuzz.trimf(self.risk.universe, [20, 50, 70])
+        self.risk['high'] = fuzz.trimf(self.risk.universe, [60, 80, 90])
+        self.risk['critical'] = fuzz.trimf(self.risk.universe, [85, 100, 100])
+
+        # Fuzzy Rules Matrix (based on Mati fire scenario)
+        rule1 = ctrl.Rule(self.tti['imminent'] & self.routes['bottlenecked'],
+                         self.risk['critical'])  # MATI SCENARIO
+        rule2 = ctrl.Rule(self.tti['imminent'] & self.routes['sufficient'],
+                         self.risk['high'])
+        rule3 = ctrl.Rule(self.tti['near_future'] & self.routes['bottlenecked'],
+                         self.risk['high'])
+        rule4 = ctrl.Rule(self.tti['near_future'] & self.routes['sufficient'],
+                         self.risk['medium'])
+        rule5 = ctrl.Rule(self.tti['distant'], self.risk['low'])
+        rule6 = ctrl.Rule(self.tti['imminent'], self.risk['high'])  # Any imminent threat is high
+
+        # Control system
+        self.risk_ctrl = ctrl.ControlSystem([rule1, rule2, rule3, rule4, rule5, rule6])
+        self.risk_simulation = ctrl.ControlSystemSimulation(self.risk_ctrl)
+
+    def _calculate_ros(self, slope: float, wind_speed: float) -> float:
+        """
+        Calculate Rate of Spread using simplified Rothermel equation.
+
+        ROS = R_base * (1 + phi_wind) * (1 + phi_slope)
+        phi_slope = 5.275 * (tan(φ))^2
+        phi_wind = C * U^B
+
+        Returns: Rate of spread in m/s
+        """
+        # Slope factor: phi_slope = 5.275 * (tan(slope))^2
+        slope_radians = np.arctan(slope / 100.0)  # Convert percentage to radians
+        phi_slope = 5.275 * (np.tan(slope_radians) ** 2)
+
+        # Wind factor: phi_wind = C * U^B
+        phi_wind = ROTHERMEL_WIND_C * (wind_speed ** ROTHERMEL_WIND_B)
+
+        # Combined ROS
+        ros = ROTHERMEL_BASE_ROS * (1 + phi_wind) * (1 + phi_slope)
+
+        return ros
+
+    def _calculate_tti(self, distance_to_settlement: float, ros: float) -> float:
+        """
+        Calculate Time To Impact.
+        TTI = Distance / ROS
+
+        Returns: Time in meters (using distance as proxy for now)
+        """
+        if ros <= 0:
+            return float('inf')
+
+        # For simplicity, return distance as TTI approximation
+        # In real scenario: TTI = distance / ros (in time units)
+        return distance_to_settlement
+
+    def perceive(self, environment) -> None:
+        """Collect fire detection reports from Sentinels"""
+        for message in self.messages_inbox:
+            if message.performative == "INFORM" and message.content.get('type') == 'FIRE_DETECTION':
+                self.fire_reports.append(message.content)
+
+    def decide(self) -> None:
+        """
+        Analyze fire reports using Rothermel ROS model and calculate TTI.
+        Apply fuzzy logic for final risk assessment.
+        """
+        self.risk_assessments.clear()
+
+        if not self.fire_reports:
+            self.tti_value = float('inf')
+            self.ros_value = 0.0
+            return
+
+        # Find closest fire to settlement (simplified: use agent position)
+        min_distance = float('inf')
+        closest_fire = None
+
+        for report in self.fire_reports:
+            lat, lon = report['lat'], report['lon']
+            # Calculate distance from analyst position (proxy for settlement)
+            dist = np.sqrt((lat - self.position[0])**2 + (lon - self.position[1])**2) * 111320  # Convert to meters
+
+            if dist < min_distance:
+                min_distance = dist
+                closest_fire = report
+
+        if closest_fire is None:
+            self.tti_value = float('inf')
+            self.ros_value = 0.0
+            self.fire_reports.clear()
+            return
+
+        # Calculate slope (simplified - use random for now, should use elevation grid)
+        slope_percentage = np.random.uniform(0, 30)
+
+        # Calculate ROS using Rothermel model
+        self.ros_value = self._calculate_ros(slope_percentage, WIND_SPEED)
+
+        # Calculate TTI (Time To Impact)
+        self.tti_value = self._calculate_tti(min_distance, self.ros_value)
+
+        # Get number of exit routes (from environment, set in act())
+        # For now, use a default
+        num_exits = 3  # Will be updated in act() when environment is available
+
+        # Run fuzzy inference
+        try:
+            tti_clamped = max(0, min(200, self.tti_value))
+            exits_clamped = max(0, min(10, num_exits))
+
+            self.risk_simulation.input['tti'] = tti_clamped
+            self.risk_simulation.input['routes'] = exits_clamped
+
+            self.risk_simulation.compute()
+            risk_level = self.risk_simulation.output['risk']
+
+            # Store assessment
+            lat, lon = closest_fire['lat'], closest_fire['lon']
+            self.risk_assessments[(lat, lon)] = risk_level
+
+        except Exception as e:
+            # Fallback to TTI-based risk
+            if self.tti_value < ANALYST_TTI_IMMINENT:
+                risk_level = 90.0
+            elif self.tti_value < ANALYST_TTI_NEAR:
+                risk_level = 60.0
+            else:
+                risk_level = 30.0
+
+            lat, lon = closest_fire['lat'], closest_fire['lon']
+            self.risk_assessments[(lat, lon)] = risk_level
+
+        # Clear old reports
+        self.fire_reports.clear()
+
+    def act(self, environment) -> None:
+        """Send risk reports to Commander with TTI and ROS data"""
+        if self.risk_assessments:
+            # Calculate overall risk (max risk in area)
+            max_risk = max(self.risk_assessments.values())
+            avg_risk = np.mean(list(self.risk_assessments.values()))
+
+            # Get actual number of exits from environment
+            num_exits = environment.num_exits
+
+            message = Message(
+                sender=self.agent_id,
+                receiver="commander",
+                performative="INFORM",
+                content={
+                    'type': 'RISK_REPORT',
+                    'max_risk': max_risk,
+                    'avg_risk': avg_risk,
+                    'tti': self.tti_value,
+                    'ros': self.ros_value,
+                    'num_exits': num_exits,
+                    'fire_locations': list(self.risk_assessments.keys()),
+                    'timestamp': environment.step_count
+                }
+            )
+            self.send_message(message)
