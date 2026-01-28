@@ -370,6 +370,6 @@ If you use AIGIS in your research, please cite:
 ```
 AIGIS: AI for Guardian & Intervention Systems
 Multi-Agent Wildfire Evacuation Simulation
-https://github.com/[your-username]/AIGIS
+https://github.com/ChristinaMakri/AIGIS
 ```
 
