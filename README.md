@@ -373,6 +373,3 @@ Multi-Agent Wildfire Evacuation Simulation
 https://github.com/[your-username]/AIGIS
 ```
 
-## Author
-
-Created as a demonstration of Multi-Agent Systems for disaster management scenarios, featuring location-agnostic deployment and research-grade statistical analysis.
