@@ -61,6 +61,12 @@ WIND_OSCILLATION_PERIOD = 50.0  # steps
 WIND_OSCILLATION_AMPLITUDE = 20.0  # degrees
 WIND_SPEED = 5.0  # m/s (base speed)
 
+# Wind direction vector (used by Sentinel for signal detection)
+# Calculated from WIND_INITIAL_DIRECTION
+import numpy as np
+_wind_rad = np.radians(WIND_INITIAL_DIRECTION)
+WIND_DIRECTION = [np.sin(_wind_rad), -np.cos(_wind_rad)]  # [dx, dy] in grid coords
+
 # =============================================================================
 # FIRE SPREAD (Rothermel-Based)
 # =============================================================================
@@ -127,6 +133,7 @@ COMMANDER_PHASE_EVACUATE_MULTIPLIER = 1.0  # TTI > 1.0 × ECT
 # =============================================================================
 
 RESCUER_MAX_SPEED = 3.0  # grid cells per step
+RESCUER_PATH_RECALC_INTERVAL = 20  # Recalculate path every N steps (performance optimization)
 RESCUER_FUEL_CAPACITY = 100
 RESCUER_RISK_ALPHA = 50.0  # Risk penalty weight
 RESCUER_SAFETY_THRESHOLD = 70.0  # Temperature threshold (refuse if path > this)
@@ -155,6 +162,9 @@ CIVILIAN_CONFUSED_SPEED_FACTOR = 0.5  # 50% speed when confused
 # Social Force Model (Herding)
 CIVILIAN_VISION_RADIUS = 10  # Grid cells for seeing neighbors
 CIVILIAN_HERDING_INFLUENCE = 0.7  # Weight of neighbor average direction
+
+# Performance Optimization
+CIVILIAN_PATH_RECALC_INTERVAL = 20  # Recalculate path every N steps (staggered pathfinding)
 
 # =============================================================================
 # MONTE CARLO / BATCH MODE

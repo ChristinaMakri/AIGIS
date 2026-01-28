@@ -1,8 +1,10 @@
 """
 Fire Spreading Model with Dynamic Wind
 Implements Rothermel-based spread with wind direction that changes over time
+Uses vectorized operations with scipy.signal.convolve2d for performance
 """
 import numpy as np
+from scipy import signal
 from typing import Tuple
 from .config import (
     FIRE_SPREAD_PROB_BASE,
@@ -108,53 +110,62 @@ class FireSimulation:
         """
         Execute one step of fire propagation with dynamic wind.
 
-        Logic:
-        - Update wind direction (oscillates over time)
-        - Burning cells spread to neighboring fuel cells
-        - Probability affected by: wind, slope, burning neighbors
-        - Burning cells eventually burn out
+        VECTORIZED IMPLEMENTATION using scipy.signal.convolve2d
+        - No for loops over cells (O(1) operations on entire grid)
+        - Uses convolution kernels for neighbor counting
+        - Processes all 8 spread directions with numpy array operations
         """
         # Update wind direction (dynamic)
         self._update_wind_vector()
 
         fire_grid = self.environment.fire_grid
         new_fire_grid = fire_grid.copy()
-
         rows, cols = fire_grid.shape
 
-        # Find all burning cells
-        burning_cells = np.argwhere(fire_grid == 1)
+        # ===== VECTORIZED BURNOUT =====
+        burning_mask = (fire_grid == 1)
+        burnout_random = np.random.random((rows, cols))
+        burnout_mask = burning_mask & (burnout_random < FIRE_BURNOUT_PROB)
+        new_fire_grid[burnout_mask] = 2
 
-        for row, col in burning_cells:
-            # Burn out with probability
-            if np.random.random() < FIRE_BURNOUT_PROB:
-                new_fire_grid[row, col] = 2
-                continue
+        # Cells still burning after burnout
+        still_burning = (fire_grid == 1) & (new_fire_grid != 2)
 
-            # Spread to neighbors (Moore neighborhood)
-            for dr in [-1, 0, 1]:
-                for dc in [-1, 0, 1]:
-                    if dr == 0 and dc == 0:
-                        continue
+        # ===== VECTORIZED NEIGHBOR COUNTING =====
+        # Count burning neighbors using convolution
+        neighbor_kernel = np.array([[1, 1, 1],
+                                    [1, 0, 1],
+                                    [1, 1, 1]], dtype=np.float32)
 
-                    nr, nc = row + dr, col + dc
+        burning_neighbors_count = signal.convolve2d(
+            still_burning.astype(np.float32),
+            neighbor_kernel,
+            mode='same',
+            boundary='fill',
+            fillvalue=0
+        )
 
-                    # Check bounds
-                    if not (0 <= nr < rows and 0 <= nc < cols):
-                        continue
+        # ===== VECTORIZED SPREAD FOR 8 DIRECTIONS =====
+        directions = [
+            (-1, -1), (-1, 0), (-1, 1),
+            (0, -1),           (0, 1),
+            (1, -1),  (1, 0),  (1, 1)
+        ]
 
-                    # Can only spread to fuel cells
-                    if fire_grid[nr, nc] != 3:
-                        continue
+        for dr, dc in directions:
+            # Calculate spread probabilities for this direction (vectorized)
+            spread_probs = self._calculate_directional_spread_vectorized(
+                dr, dc, still_burning, burning_neighbors_count
+            )
 
-                    # Calculate spread probability
-                    spread_prob = self._calculate_spread_probability(
-                        row, col, nr, nc, dr, dc
-                    )
+            # Valid targets: fuel cells not yet ignited
+            target_mask = (fire_grid == 3) & (new_fire_grid == 3)
 
-                    # Spread fire
-                    if np.random.random() < spread_prob:
-                        new_fire_grid[nr, nc] = 1
+            # Stochastic spread
+            spread_random = np.random.random((rows, cols))
+            spread_mask = target_mask & (spread_random < spread_probs)
+
+            new_fire_grid[spread_mask] = 1
 
         self.environment.fire_grid = new_fire_grid
         self.environment.step_count += 1
@@ -219,7 +230,10 @@ class FireSimulation:
         return min(1.0, final_prob)
 
     def _count_burning_neighbors(self, row: int, col: int) -> int:
-        """Count number of burning neighbors around a cell"""
+        """
+        Count number of burning neighbors around a cell
+        NOTE: This method is kept for compatibility but is not used in vectorized step()
+        """
         count = 0
         fire_grid = self.environment.fire_grid
 
@@ -235,6 +249,120 @@ class FireSimulation:
                         count += 1
 
         return count
+
+    def _calculate_directional_spread_vectorized(self, dr: int, dc: int,
+                                                  burning_mask: np.ndarray,
+                                                  neighbor_counts: np.ndarray) -> np.ndarray:
+        """
+        VECTORIZED: Calculate spread probability for a specific direction across entire grid.
+
+        Args:
+            dr, dc: Direction offset (-1, 0, or 1)
+            burning_mask: Boolean array of cells that are burning
+            neighbor_counts: Array of burning neighbor counts per cell
+
+        Returns:
+            Array of spread probabilities for each cell
+        """
+        rows, cols = burning_mask.shape
+
+        # Shift burning mask to align sources with targets
+        shifted_burning = np.zeros_like(burning_mask, dtype=bool)
+
+        # Calculate slice indices for shift operation
+        if dr < 0:
+            r_src, r_tgt = slice(-dr, None), slice(None, dr)
+        elif dr > 0:
+            r_src, r_tgt = slice(None, -dr), slice(dr, None)
+        else:
+            r_src, r_tgt = slice(None), slice(None)
+
+        if dc < 0:
+            c_src, c_tgt = slice(-dc, None), slice(None, dc)
+        elif dc > 0:
+            c_src, c_tgt = slice(None, -dc), slice(dc, None)
+        else:
+            c_src, c_tgt = slice(None), slice(None)
+
+        # Shift burning mask (align sources with their targets)
+        shifted_burning[r_tgt, c_tgt] = burning_mask[r_src, c_src]
+
+        # Base probability
+        base_prob = FIRE_SPREAD_PROB_BASE
+
+        # Wind factor (constant for this direction)
+        spread_direction = np.array([dc, dr], dtype=np.float32)
+        spread_mag = np.linalg.norm(spread_direction)
+        if spread_mag > 0:
+            spread_direction = spread_direction / spread_mag
+            wind_alignment = np.dot(spread_direction, self.wind_direction)
+            phi_wind = ROTHERMEL_WIND_C * (self.wind_speed ** ROTHERMEL_WIND_B)
+            wind_factor = 1.0 + phi_wind * max(0, wind_alignment)
+        else:
+            wind_factor = 1.0
+
+        # Slope factor (vectorized across entire grid)
+        slope_factor = self._calculate_slope_factor_vectorized(dr, dc)
+
+        # Neighbor factor (vectorized)
+        neighbor_factor = 1.0 + (neighbor_counts * 0.1)
+
+        # Combined probability
+        spread_probs = base_prob * wind_factor * slope_factor * neighbor_factor
+
+        # Clip to [0, 1] and apply only where there's a burning source
+        spread_probs = np.clip(spread_probs, 0, 1) * shifted_burning.astype(np.float32)
+
+        return spread_probs
+
+    def _calculate_slope_factor_vectorized(self, dr: int, dc: int) -> np.ndarray:
+        """
+        VECTORIZED: Calculate slope factor for entire grid in a specific direction.
+
+        Args:
+            dr, dc: Direction offset
+
+        Returns:
+            Array of slope multipliers (1.0 + phi_slope for uphill, 1.0 for downhill)
+        """
+        elevation_grid = self.environment.elevation_grid
+        rows, cols = elevation_grid.shape
+
+        # Shift elevation grid to get target elevations
+        shifted_elevation = np.zeros_like(elevation_grid)
+
+        if dr < 0:
+            r_src, r_tgt = slice(-dr, None), slice(None, dr)
+        elif dr > 0:
+            r_src, r_tgt = slice(None, -dr), slice(dr, None)
+        else:
+            r_src, r_tgt = slice(None), slice(None)
+
+        if dc < 0:
+            c_src, c_tgt = slice(-dc, None), slice(None, dc)
+        elif dc > 0:
+            c_src, c_tgt = slice(None, -dc), slice(dc, None)
+        else:
+            c_src, c_tgt = slice(None), slice(None)
+
+        shifted_elevation[r_tgt, c_tgt] = elevation_grid[r_src, c_src]
+
+        # Height difference
+        height_diff = shifted_elevation - elevation_grid
+
+        # Distance (constant for this direction)
+        distance = np.sqrt(dr**2 + dc**2)
+
+        # Slope angle
+        slope_angle = np.arctan2(height_diff, distance)
+
+        # Slope factor (only apply for uphill)
+        slope_factor = np.ones_like(slope_angle)
+        uphill_mask = (slope_angle > 0)
+        phi_slope = ROTHERMEL_SLOPE_FACTOR * (np.tan(slope_angle[uphill_mask]) ** 2)
+        slope_factor[uphill_mask] = 1.0 + phi_slope
+
+        return slope_factor
 
     def _update_temperature_grid(self) -> None:
         """Update temperature grid based on fire state"""

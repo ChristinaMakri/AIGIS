@@ -19,7 +19,9 @@ from ..config import (
     CIVILIAN_PANIC_BETA,
     CIVILIAN_PANIC_DECAY,
     CIVILIAN_CONFUSED_SPEED_FACTOR,
-    CIVILIAN_VISION_RADIUS
+    CIVILIAN_VISION_RADIUS,
+    CIVILIAN_HERDING_INFLUENCE,
+    CIVILIAN_PATH_RECALC_INTERVAL
 )
 
 
@@ -69,6 +71,11 @@ class CivilianAgent(Agent):
         self.vision_radius = CIVILIAN_VISION_RADIUS
         self.nearby_agents = []  # For herding behavior
         self.last_movement = None  # Track movement direction for others to follow
+
+        # Performance Optimization: Staggered Pathfinding
+        self.path_recalc_interval = CIVILIAN_PATH_RECALC_INTERVAL
+        self.steps_since_recalc = 0
+        self.recalc_offset = np.random.randint(0, self.path_recalc_interval)  # Random offset
 
     def perceive(self, environment) -> None:
         """
@@ -368,8 +375,19 @@ class CivilianAgent(Agent):
                 self.safety_node = environment.find_nearest_safe_node(self.current_node)
                 self.current_path = []  # Force re-routing
 
+            # STAGGERED PATHFINDING: Check if periodic recalculation is needed
+            # Recalculate every N steps (with random offset) to adjust for traffic density
+            self.steps_since_recalc += 1
+            should_recalc_periodic = (
+                (self.steps_since_recalc + self.recalc_offset) % self.path_recalc_interval == 0
+            )
+
             # Calculate path if needed
-            if not self.current_path and self.safety_node:
+            # Reasons: 1) No path yet, 2) Periodic recalculation
+            if (not self.current_path or should_recalc_periodic) and self.safety_node:
+                if should_recalc_periodic:
+                    self.steps_since_recalc = 0  # Reset counter
+
                 try:
                     self.current_path = nx.shortest_path(
                         environment.graph,

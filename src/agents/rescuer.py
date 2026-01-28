@@ -12,7 +12,8 @@ from ..config import (
     RESCUER_MAX_SPEED,
     RESCUER_FUEL_CAPACITY,
     RESCUER_RISK_ALPHA,
-    RESCUER_SAFETY_THRESHOLD
+    RESCUER_SAFETY_THRESHOLD,
+    RESCUER_PATH_RECALC_INTERVAL
 )
 
 
@@ -42,6 +43,11 @@ class RescuerAgent(Agent):
         # Risk assessment parameters
         self.risk_alpha = RESCUER_RISK_ALPHA
         self.safety_threshold = RESCUER_SAFETY_THRESHOLD
+
+        # Performance Optimization: Staggered Pathfinding
+        self.path_recalc_interval = RESCUER_PATH_RECALC_INTERVAL
+        self.steps_since_recalc = 0
+        self.recalc_offset = np.random.randint(0, self.path_recalc_interval)  # Random offset
 
     def perceive(self, environment) -> None:
         """Receive CFPs and mission assignments"""
@@ -225,6 +231,24 @@ class RescuerAgent(Agent):
     def act(self, environment) -> None:
         """Execute movement or complete mission"""
         if self.mission_status == "MOVING" and self.current_path:
+            # STAGGERED PATHFINDING: Periodic recalculation
+            self.steps_since_recalc += 1
+            should_recalc_periodic = (
+                (self.steps_since_recalc + self.recalc_offset) % self.path_recalc_interval == 0
+            )
+
+            if should_recalc_periodic and self.target_node:
+                self.steps_since_recalc = 0  # Reset counter
+                try:
+                    self.current_path = nx.shortest_path(
+                        environment.graph,
+                        self.current_node,
+                        self.target_node,
+                        weight='length'
+                    )
+                except (nx.NetworkXNoPath, nx.NodeNotFound):
+                    pass  # Keep current path if recalculation fails
+
             # Move along path
             if len(self.current_path) > 1:
                 next_node = self.current_path[1]

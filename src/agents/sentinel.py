@@ -65,17 +65,24 @@ class SentinelAgent(Agent):
         # Track current detections for debouncing
         current_detections = set()
 
-        # Scan Moore neighborhood within detection radius
+        # SPATIAL OPTIMIZATION: Bounding Box + Circular Check
+        # Only scan within detection_radius (not the entire grid)
+        # This reduces complexity from O(N^2) to O(R^2) where R << N
         for dr in range(-self.detection_radius, self.detection_radius + 1):
             for dc in range(-self.detection_radius, self.detection_radius + 1):
                 if dr == 0 and dc == 0:
+                    continue
+
+                # CIRCULAR BOUNDARY: Skip cells outside circular detection range
+                distance_sq = dr**2 + dc**2
+                if distance_sq > self.detection_radius**2:
                     continue
 
                 r, c = row + dr, col + dc
 
                 # Check bounds
                 if 0 <= r < fire_grid.shape[0] and 0 <= c < fire_grid.shape[1]:
-                    # Only process burning cells
+                    # Only process burning cells (skip empty cells immediately)
                     if fire_grid[r, c] == 1:
                         # Calculate attenuated signal
                         I_actual = temp_grid[r, c]  # Actual fire intensity
