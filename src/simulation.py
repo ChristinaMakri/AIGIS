@@ -50,6 +50,10 @@ class AIGISSimulation:
         # Initialize agents
         self.agents = self._initialize_agents()
 
+        # Expose agents to environment for ECT calculation
+        # This allows Commander to count active civilians for accurate ECT
+        self.environment.agents = self.agents
+
         # Metrics tracking
         self.metrics = {
             'casualties': [],

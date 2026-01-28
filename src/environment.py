@@ -109,19 +109,50 @@ class Environment:
             except (nx.NetworkXNoPath, nx.NodeNotFound):
                 continue
 
-        # Fallback if no path found
+        # Fallback if no path found to any safe node
         if nearest_safe is None:
-            nearest_safe = list(self.safe_nodes)[0] if self.safe_nodes else from_node
+            # Try perimeter node as last resort (edges of map are considered safe)
+            try:
+                nearest_safe = self._get_perimeter_node()
+            except:
+                # Ultimate fallback: stay at current location
+                nearest_safe = from_node
 
         return nearest_safe
 
     def _get_perimeter_node(self) -> int:
-        """Get a node at the map perimeter (fallback)"""
+        """
+        Get a node at the map perimeter (fallback for safe zones).
+        Returns a node at the edge of the map, which are considered safe.
+        """
         if len(self.graph.nodes) == 0:
-            return 0
+            raise ValueError("Graph has no nodes")
 
-        # Return a random node (simplified)
-        return list(self.graph.nodes())[0]
+        # Find nodes at the perimeter (min/max lat/lon)
+        min_lon, min_lat, max_lon, max_lat = self.bounds
+        perimeter_nodes = []
+
+        for node in self.graph.nodes():
+            data = self.graph.nodes[node]
+            lat, lon = data['y'], data['x']
+
+            # Check if node is near perimeter (within 5% of bounds)
+            margin = 0.05
+            lat_range = max_lat - min_lat
+            lon_range = max_lon - min_lon
+
+            is_perimeter = (
+                lat <= (min_lat + margin * lat_range) or
+                lat >= (max_lat - margin * lat_range) or
+                lon <= (min_lon + margin * lon_range) or
+                lon >= (max_lon - margin * lon_range)
+            )
+
+            if is_perimeter:
+                perimeter_nodes.append(node)
+
+        # Return first perimeter node found, or any node as ultimate fallback
+        return perimeter_nodes[0] if perimeter_nodes else list(self.graph.nodes())[0]
 
 
 class LiveMapBuilder:

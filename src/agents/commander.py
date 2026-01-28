@@ -320,10 +320,12 @@ class CommanderAgent(Agent):
         Implements 4-phase protocol based on ECT vs TTI.
         """
         # Calculate ECT - count actual active civilians from environment
-        # Access simulation's agent list through environment reference
-        num_civilians = len(getattr(environment, 'civilians', []))
-        if num_civilians == 0:
-            num_civilians = 20  # Fallback if environment doesn't expose civilians
+        # Access simulation's agent list through environment.agents
+        agents = getattr(environment, 'agents', None)
+        if agents and 'civilians' in agents:
+            num_civilians = sum(1 for c in agents['civilians'] if c.is_active)
+        else:
+            num_civilians = 20  # Fallback if environment doesn't expose agents
 
         self.ect = self._calculate_ect(num_civilians)
 
