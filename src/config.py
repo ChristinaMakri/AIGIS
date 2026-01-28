@@ -113,6 +113,8 @@ SENTINEL_DEBOUNCE_STEPS = 3  # Must detect for N consecutive steps (prevents fal
 # =============================================================================
 # ANALYST AGENT (Fuzzy Logic)
 # =============================================================================
+# Analyst uses fuzzy logic to assess risk based on Time To Impact (TTI) and
+# escape route availability. These thresholds define linguistic variables.
 
 # Fuzzy Input Ranges
 ANALYST_ROS_RANGE = (0, 10)  # Rate of spread (m/s)
@@ -120,6 +122,14 @@ ANALYST_DISTANCE_RANGE = (0, 200)  # Distance to assets (meters)
 
 # Fuzzy Output Range
 ANALYST_RISK_RANGE = (0, 100)
+
+# Time To Impact (TTI) Thresholds (meters)
+ANALYST_TTI_IMMINENT = 30  # Fire is imminent (0-30 meters)
+ANALYST_TTI_NEAR = 70  # Fire approaching (30-70 meters)
+# Above 70 meters = distant threat
+
+# Escape Route Thresholds
+ANALYST_EXIT_BOTTLENECK_THRESHOLD = 2  # Number of exits (0-2 = bottlenecked, 2+ = sufficient)
 
 # Re-evaluation trigger
 ANALYST_WIND_CHANGE_THRESHOLD = 5.0  # degrees (re-evaluate if wind shifts > 5°)
