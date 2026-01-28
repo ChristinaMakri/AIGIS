@@ -172,14 +172,13 @@ class AnalystAgent(Agent):
         Calculate Time To Impact.
         TTI = Distance / ROS
 
-        Returns: Time in meters (using distance as proxy for now)
+        Returns: Time in seconds until fire reaches settlement
         """
         if ros <= 0:
             return float('inf')
 
-        # For simplicity, return distance as TTI approximation
-        # In real scenario: TTI = distance / ros (in time units)
-        return distance_to_settlement
+        # TTI = distance / rate_of_spread (meters / meters_per_second = seconds)
+        return distance_to_settlement / ros
 
     def perceive(self, environment) -> None:
         """Collect fire detection reports from Sentinels"""
@@ -227,9 +226,8 @@ class AnalystAgent(Agent):
         # Calculate TTI (Time To Impact)
         self.tti_value = self._calculate_tti(min_distance, self.ros_value)
 
-        # Get number of exit routes (from environment, set in act())
-        # For now, use a default
-        num_exits = 3  # Will be updated in act() when environment is available
+        # Get number of exit routes from environment
+        num_exits = getattr(environment, 'num_exits', 3)  # Fallback to 3 if not available
 
         # Run fuzzy inference
         try:

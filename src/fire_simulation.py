@@ -459,6 +459,10 @@ class FireSimulation:
         # Diagonal directions have distance = sqrt(2) ≈ 1.414
         distance = np.sqrt(dr**2 + dc**2)
 
+        # Safety check: if distance is zero (no spread direction), return no slope effect
+        if distance == 0:
+            return np.ones_like(elevation_grid)
+
         # Slope angle in radians: arctan(rise/run)
         slope_angle = np.arctan2(height_diff, distance)
 

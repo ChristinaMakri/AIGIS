@@ -20,7 +20,7 @@ class AIGISSimulation:
     Handles agent updates, message routing, and metrics tracking.
     """
 
-    def __init__(self, lat: float, lon: float, radius: float, mode: str = 'gui'):
+    def __init__(self, lat: float, lon: float, radius: float, mode: str = 'gui', run_id: int = 0):
         """
         Initialize simulation.
 
@@ -29,9 +29,15 @@ class AIGISSimulation:
             lon: Center longitude
             radius: Map radius in meters
             mode: 'gui' or 'batch'
+            run_id: Unique ID for Monte Carlo runs (default 0 for single runs)
         """
         self.mode = mode
         self.lat, self.lon, self.radius = lat, lon, radius
+
+        # Initialize random seed per-run for Monte Carlo experiments
+        # Each run gets a unique seed to ensure different random sequences
+        if RANDOM_SEED is not None:
+            np.random.seed(RANDOM_SEED + run_id)
 
         # Build environment
         print(f"\n🌍 Initializing simulation at ({lat:.4f}, {lon:.4f})...")

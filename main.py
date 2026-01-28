@@ -94,7 +94,7 @@ def run_monte_carlo(lat: float, lon: float, radius: float,
 
         # Each run uses a different random seed for variability
         # Simulation runs in headless mode (no GUI) for speed
-        sim = AIGISSimulation(lat, lon, radius, mode='batch')
+        sim = AIGISSimulation(lat, lon, radius, mode='batch', run_id=run_id)
         result = sim.run_until_complete()
 
         # Add metadata to results

@@ -50,6 +50,9 @@ class Environment:
         # Tracking
         self.step_count = 0
 
+        # Calculate number of exits (unique safe zones)
+        self.num_exits = len(safe_nodes) if safe_nodes else 1  # At least 1 (perimeter)
+
     def latlon_to_grid(self, lat: float, lon: float) -> Tuple[int, int]:
         """Convert lat/lon coordinates to grid indices"""
         min_lon, min_lat, max_lon, max_lat = self.bounds

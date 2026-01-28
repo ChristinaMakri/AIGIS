@@ -275,7 +275,28 @@ LOG_PHASE_TRANSITIONS = True  # Log Commander phase changes
 LOG_WIND_CHANGES = True  # Log when wind direction shifts
 
 # =============================================================================
+# CONFIGURATION VALIDATION
+# =============================================================================
+# Validate critical parameters to prevent division by zero and invalid configs
+
+assert MAX_STEPS > 0, "MAX_STEPS must be positive"
+assert GRID_WIDTH > 0 and GRID_HEIGHT > 0, "Grid dimensions must be positive"
+assert COMMANDER_EXIT_CAPACITY > 0, "Exit capacity must be positive (prevents division by zero)"
+assert RESCUER_MAX_SPEED > 0, "Rescuer speed must be positive (prevents division by zero)"
+assert CIVILIAN_V_FREE_FLOW > 0, "Civilian free flow speed must be positive"
+assert CIVILIAN_RHO_JAM > 0, "Jam density must be positive"
+assert ROTHERMEL_BASE_ROS >= 0, "Base rate of spread cannot be negative"
+assert WIND_SPEED >= 0, "Wind speed cannot be negative"
+
+# Validate panic thresholds are in logical order
+assert 0 <= CIVILIAN_PANIC_RATIONAL <= CIVILIAN_PANIC_CONFUSED <= 1.0, \
+    "Panic thresholds must be in order: 0 ≤ RATIONAL ≤ CONFUSED ≤ 1.0"
+
+# =============================================================================
 # NUMPY RANDOM SEED INITIALIZATION
 # =============================================================================
-
-np.random.seed(RANDOM_SEED)
+# NOTE: Do NOT set global seed here! This breaks Monte Carlo simulations.
+# Each simulation run must initialize its own seed (RANDOM_SEED + run_id)
+# to ensure different random sequences across runs.
+#
+# Seed initialization moved to simulation.__init__() for proper per-run seeding.
