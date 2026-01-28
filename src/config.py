@@ -28,6 +28,11 @@ DEFAULT_MAP_CENTER_LAT = 38.04  # Athens (example)
 DEFAULT_MAP_CENTER_LON = 23.80
 DEFAULT_MAP_RADIUS = 2000  # meters
 
+# Aliases for backward compatibility
+MAP_CENTER_LAT = DEFAULT_MAP_CENTER_LAT
+MAP_CENTER_LON = DEFAULT_MAP_CENTER_LON
+MAP_RADIUS = DEFAULT_MAP_RADIUS
+
 # Safe Zone Detection (OSM Tags)
 SAFE_ZONE_TAGS = {
     'natural': ['water', 'beach', 'coastline'],
@@ -63,7 +68,6 @@ WIND_SPEED = 5.0  # m/s (base speed)
 
 # Wind direction vector (used by Sentinel for signal detection)
 # Calculated from WIND_INITIAL_DIRECTION
-import numpy as np
 _wind_rad = np.radians(WIND_INITIAL_DIRECTION)
 WIND_DIRECTION = [np.sin(_wind_rad), -np.cos(_wind_rad)]  # [dx, dy] in grid coords
 
