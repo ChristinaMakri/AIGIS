@@ -236,7 +236,10 @@ class AIGISSimulation:
         self.metrics['evacuated'].append(evacuated)
 
         # Average panic level
-        avg_panic = np.mean([c.panic_level for c in self.agents['civilians']])
+        if self.agents['civilians']:
+            avg_panic = np.mean([c.panic_level for c in self.agents['civilians']])
+        else:
+            avg_panic = 0.0
         self.metrics['panic_levels'].append(avg_panic)
 
         # Active fire cells

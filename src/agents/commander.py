@@ -163,6 +163,10 @@ class CommanderAgent(Agent):
         if self.num_exits <= 0:
             return float('inf')
 
+        # Safety check: if exit capacity is zero, evacuation is impossible
+        if self.exit_capacity <= 0:
+            return float('inf')
+
         # Total exit capacity: sum of all exit capacities
         total_capacity = self.exit_capacity * self.num_exits
 

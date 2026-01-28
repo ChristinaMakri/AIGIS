@@ -201,6 +201,18 @@ class RescuerAgent(Agent):
                 self.send_message(refuse_msg)
                 return
 
+            # Safety check: refuse if speed is zero (edge case)
+            if self.max_speed <= 0:
+                refuse_msg = Message(
+                    sender=self.agent_id,
+                    receiver=message.sender,
+                    performative="REFUSE",
+                    content={'reason': 'Invalid configuration: max_speed is zero'},
+                    conversation_id=message.conversation_id
+                )
+                self.send_message(refuse_msg)
+                return
+
             # Calculate base cost
             time_cost = path_length / (self.max_speed * 100)  # Time to reach
             fuel_penalty = 100 - self.fuel
