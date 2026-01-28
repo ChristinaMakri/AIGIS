@@ -29,23 +29,52 @@ class SentinelAgent(Agent):
 
     def __init__(self, agent_id: str, position: Tuple[float, float],
                  detection_radius: int = SENTINEL_DETECTION_RADIUS):
+        """
+        Initialize Sentinel agent with Signal Detection Theory parameters.
+
+        Sentinel agents are reactive fire sensors that detect fires using a
+        physics-based signal attenuation model with environmental noise.
+
+        Signal Equation:
+        I_detected = (I_actual / (d² + ε)) × (1 + cos(θ)) + N(0, σ)
+
+        Where:
+        - I_actual: True fire intensity (from temperature grid)
+        - d: Euclidean distance to fire
+        - ε: Small constant to prevent division by zero
+        - θ: Angle between wind direction and sensor vector
+        - N(0, σ): Gaussian noise (environmental interference)
+
+        Args:
+            agent_id: Unique identifier
+            position: (latitude, longitude) position
+            detection_radius: Detection range in grid cells
+        """
         super().__init__(agent_id, position)
-        self.detection_radius = detection_radius
-        self.detected_fires = []
 
-        # Signal Detection Theory parameters
-        self.epsilon = SENTINEL_SIGNAL_EPSILON
-        self.sigma = SENTINEL_NOISE_SIGMA
-        self.threshold = SENTINEL_TRIGGER_THRESHOLD
-        self.debounce_steps = SENTINEL_DEBOUNCE_STEPS
+        # ===== DETECTION PARAMETERS =====
+        self.detection_radius = detection_radius  # Spatial scan range
+        self.detected_fires = []  # List of confirmed fire detections this step
 
-        # Wind direction (normalized)
+        # ===== SIGNAL DETECTION THEORY PARAMETERS =====
+        # These parameters model realistic sensor limitations
+        self.epsilon = SENTINEL_SIGNAL_EPSILON  # Prevents div-by-zero (d² + ε)
+        self.sigma = SENTINEL_NOISE_SIGMA  # Gaussian noise std dev (environmental)
+        self.threshold = SENTINEL_TRIGGER_THRESHOLD  # Detection threshold
+        self.debounce_steps = SENTINEL_DEBOUNCE_STEPS  # Consecutive detections required
+
+        # ===== WIND DIRECTION (for signal attenuation) =====
+        # Wind carries smoke/heat toward sensor → increases detection probability
+        # Wind blowing away from sensor → decreases detection probability
         self.wind_direction = np.array(WIND_DIRECTION, dtype=np.float32)
         wind_mag = np.linalg.norm(self.wind_direction)
         if wind_mag > 0:
-            self.wind_direction = self.wind_direction / wind_mag
+            self.wind_direction = self.wind_direction / wind_mag  # Normalize
 
-        # Debouncing: track detection history per location
+        # ===== DEBOUNCING: PREVENT FALSE ALARMS =====
+        # Requires N consecutive detections before triggering alert
+        # Prevents noise spikes from causing false positives
+        # Dictionary maps (row, col) → consecutive_detection_count
         self.detection_history = {}  # (row, col) -> consecutive_count
 
     def perceive(self, environment) -> None:

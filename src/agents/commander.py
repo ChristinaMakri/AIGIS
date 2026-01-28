@@ -30,89 +30,200 @@ class CommanderAgent(Agent):
     """
 
     def __init__(self, agent_id: str, position: Tuple[float, float]):
-        super().__init__(agent_id, position)
-        self.current_risk = 0.0
-        self.tti = float('inf')  # Time To Impact from Analyst
-        self.ect = 0.0  # Evacuation Clearance Time
-        self.ros = 0.0  # Rate of Spread from Analyst
-        self.num_exits = 1
+        """
+        Initialize Commander agent with ECT vs TTI decision framework.
 
+        The Commander is the central decision-maker implementing a 4-phase protocol
+        based on comparing:
+        - ECT (Evacuation Clearance Time): How long to evacuate everyone
+        - TTI (Time To Impact): How long until fire arrives
+
+        Decision Logic:
+        - TTI >> ECT: Safe, monitoring phase
+        - TTI > ECT: Time to prepare/evacuate
+        - TTI ≈ ECT: Emergency evacuation
+        - TTI ≤ ECT: Too late, shelter-in-place
+
+        Args:
+            agent_id: Unique identifier
+            position: (latitude, longitude) position
+        """
+        super().__init__(agent_id, position)
+
+        # ===== RISK ASSESSMENT STATE =====
+        # Receives risk reports from Analyst agent with fire spread predictions
+        self.current_risk = 0.0  # Current maximum risk level (0-100)
+        self.tti = float('inf')  # Time To Impact (minutes until fire reaches assets)
+        self.ect = 0.0  # Evacuation Clearance Time (minutes to evacuate all civilians)
+        self.ros = 0.0  # Rate of Spread from Analyst (m/s)
+        self.num_exits = 1  # Number of available evacuation exits
+
+        # History tracking for trend analysis
         self.risk_history: List[float] = []
-        self.active_missions: Dict[str, Dict] = {}  # mission_id -> mission_data
-        self.pending_proposals: Dict[str, List[Message]] = {}  # cfp_id -> proposals
+
+        # ===== CONTRACT NET PROTOCOL STATE =====
+        # Manages rescue missions using CNP (Call For Proposal → Propose → Accept/Reject)
+        self.active_missions: Dict[str, Dict] = {}  # mission_id → mission_data
+        self.pending_proposals: Dict[str, List[Message]] = {}  # cfp_id → list of proposals
+
+        # Re-evaluation throttling (avoid recalculating every step)
         self.last_evaluation_step = 0
 
-        # Phase tracking
-        self.current_phase = 0  # 0=Monitoring, 1=Pre-Evac, 2=Mass Evac, 3=Shelter
-        self.evacuation_ordered = False
-        self.warning_sent = False
+        # ===== 4-PHASE PROTOCOL STATE =====
+        # Phase 0: Monitoring (TTI > 2.5×ECT)
+        # Phase 1: Pre-Evacuation Warning (1.5×ECT < TTI ≤ 2.5×ECT)
+        # Phase 2: Mass Evacuation (1.0×ECT < TTI ≤ 1.5×ECT)
+        # Phase 3: Shelter-in-Place (TTI ≤ ECT)
+        self.current_phase = 0
+        self.evacuation_ordered = False  # Flag: evacuation order sent
+        self.warning_sent = False  # Flag: pre-evacuation warning sent
 
-        # ECT parameters
-        self.congestion_factor = COMMANDER_CONGESTION_FACTOR_BASE
-        self.exit_capacity = COMMANDER_EXIT_CAPACITY
+        # ===== ECT CALCULATION PARAMETERS =====
+        # ECT = (N_agents / C_exit) × γ_congestion
+        self.congestion_factor = COMMANDER_CONGESTION_FACTOR_BASE  # Congestion multiplier
+        self.exit_capacity = COMMANDER_EXIT_CAPACITY  # Agents per minute per exit
 
-        # Utility weights
-        self.w_safety = 0.6
-        self.w_cost = 0.2
-        self.w_congestion = 0.2
+        # ===== UTILITY FUNCTION WEIGHTS =====
+        # For multi-objective decision making when selecting rescuers
+        self.w_safety = 0.6  # Weight for safety (low risk paths)
+        self.w_cost = 0.2  # Weight for cost (ETA, distance)
+        self.w_congestion = 0.2  # Weight for congestion avoidance
 
     def perceive(self, environment) -> None:
-        """Receive risk reports with TTI/ROS data and mission status updates"""
+        """
+        Perceive environment through FIPA-ACL messages.
+
+        Message Types:
+        1. INFORM (from Analyst): Risk reports with TTI, ROS, and exit availability
+        2. PROPOSE (from Rescuers): Bids for rescue missions (Contract Net Protocol)
+        3. CONFIRM (from Rescuers): Mission completion notifications
+
+        The Commander is a "command center" agent that doesn't directly sense the
+        environment but relies on reports from specialized sensor/analysis agents.
+        """
         for message in self.messages_inbox:
+            # ===== RISK REPORTS FROM ANALYST =====
             if message.performative == "INFORM":
                 if message.content.get('type') == 'RISK_REPORT':
-                    self.current_risk = message.content['max_risk']
-                    self.tti = message.content.get('tti', float('inf'))
-                    self.ros = message.content.get('ros', 0.0)
-                    self.num_exits = message.content.get('num_exits', 1)
+                    # Extract fire spread predictions from Analyst
+                    self.current_risk = message.content['max_risk']  # Max risk level (0-100)
+                    self.tti = message.content.get('tti', float('inf'))  # Time To Impact (min)
+                    self.ros = message.content.get('ros', 0.0)  # Rate of Spread (m/s)
+                    self.num_exits = message.content.get('num_exits', 1)  # Available exits
+
+                    # Track risk over time for trend analysis
                     self.risk_history.append(self.current_risk)
 
+            # ===== CONTRACT NET PROTOCOL: PROPOSALS FROM RESCUERS =====
             elif message.performative == "PROPOSE":
-                # Collect proposals for Contract Net Protocol
+                # Rescuers respond to CFP with their bids (cost, ETA, risk)
+                # Collect all proposals to select best rescuer
                 cfp_id = message.conversation_id
                 if cfp_id not in self.pending_proposals:
                     self.pending_proposals[cfp_id] = []
                 self.pending_proposals[cfp_id].append(message)
 
+            # ===== MISSION STATUS UPDATES =====
             elif message.performative == "CONFIRM":
-                # Mission completed
+                # Rescuer confirms mission completion
                 mission_id = message.content.get('mission_id')
                 if mission_id in self.active_missions:
-                    del self.active_missions[mission_id]
+                    del self.active_missions[mission_id]  # Remove from active list
 
     def _calculate_ect(self, num_agents: int) -> float:
         """
-        Calculate Evacuation Clearance Time.
-        ECT = (N_agents / C_exit) * gamma
+        Calculate Evacuation Clearance Time (ECT).
+
+        ECT represents the time needed to evacuate all agents through available exits,
+        accounting for exit capacity and congestion.
+
+        Formula: ECT = (N_agents / C_total) × γ_congestion
+
+        Where:
+        - N_agents: Number of civilians to evacuate
+        - C_total: Total exit capacity (agents/minute) = C_exit × num_exits
+        - γ_congestion: Congestion multiplier (increases with density)
+
+        Example:
+        - 20 agents, 1 exit with capacity 10 agents/min, γ=1.0
+        - ECT = (20 / 10) × 1.0 = 2 minutes
+
+        This is compared against TTI (Time To Impact) to determine if evacuation
+        is safe:
+        - ECT < TTI: Safe to evacuate (enough time)
+        - ECT ≥ TTI: Too late to evacuate (shelter in place)
+
+        Args:
+            num_agents: Number of civilians to evacuate
+
+        Returns:
+            Evacuation clearance time in minutes
         """
+        # Safety check: if no exits available, evacuation is impossible
         if self.num_exits <= 0:
             return float('inf')
 
-        # Total exit capacity
+        # Total exit capacity: sum of all exit capacities
         total_capacity = self.exit_capacity * self.num_exits
 
-        # ECT calculation
+        # ECT calculation with congestion factor
+        # Congestion factor increases in dense crowds (bottlenecks, panic)
         ect = (num_agents / total_capacity) * self.congestion_factor
 
         return ect
 
     def _determine_phase(self, tti: float, ect: float) -> int:
         """
-        Determine current phase based on TTI vs ECT comparison.
+        Determine evacuation phase using TTI vs ECT comparison.
 
-        Phase 0 (Monitoring): TTI > 2.5 * ECT
-        Phase 1 (Pre-Alert): 1.5 * ECT < TTI <= 2.5 * ECT
-        Phase 2 (Mass Evacuation): 1.0 * ECT < TTI <= 1.5 * ECT
-        Phase 3 (Shelter-in-Place): TTI <= ECT
+        This is the CORE decision logic of the Commander agent, implementing a
+        4-phase protocol based on time margins. The phases represent increasing
+        urgency as fire approaches.
+
+        PHASE 0: MONITORING (TTI > 2.5 × ECT)
+        - Fire is distant, no immediate threat
+        - Continue surveillance, no action needed
+        - Maintain situational awareness
+        - Example: TTI=50min, ECT=20min → 50 > 2.5×20 → Monitor
+
+        PHASE 1: PRE-ALERT (1.5×ECT < TTI ≤ 2.5×ECT)
+        - Fire approaching but still manageable
+        - Send warning to civilians (prepare to evacuate)
+        - Alert rescuers to standby
+        - Example: TTI=35min, ECT=20min → 35 > 1.5×20 but 35 ≤ 2.5×20 → Pre-Alert
+
+        PHASE 2: MASS EVACUATION (1.0×ECT < TTI ≤ 1.5×ECT)
+        - Fire approaching critical distance
+        - Order immediate mass evacuation
+        - All civilians must evacuate NOW
+        - Example: TTI=25min, ECT=20min → 25 > 20 but 25 ≤ 1.5×20 → Evacuate
+
+        PHASE 3: SHELTER-IN-PLACE (TTI ≤ ECT)
+        - TOO LATE to evacuate safely
+        - Fire will arrive before evacuation completes
+        - Redirect civilians to nearest safe zones (water, parks, bunkers)
+        - Based on real disasters (Mati Fire 2018: civilians trapped on highways)
+        - Example: TTI=15min, ECT=20min → 15 ≤ 20 → Shelter
+
+        Reference: This decision protocol is based on evacuation management
+        research and lessons learned from wildfire disasters where late
+        evacuation orders led to casualties.
+
+        Args:
+            tti: Time To Impact (minutes until fire reaches population)
+            ect: Evacuation Clearance Time (minutes to evacuate all civilians)
+
+        Returns:
+            Phase number (0=Monitor, 1=Pre-Alert, 2=Evacuate, 3=Shelter)
         """
         if tti > COMMANDER_PHASE_MONITOR_MULTIPLIER * ect:
-            return 0  # Monitoring
+            return 0  # Phase 0: Monitoring (plenty of time)
         elif tti > COMMANDER_PHASE_PREALERT_MULTIPLIER * ect:
-            return 1  # Pre-Alert
+            return 1  # Phase 1: Pre-Alert (prepare to evacuate)
         elif tti > COMMANDER_PHASE_EVACUATE_MULTIPLIER * ect:
-            return 2  # Mass Evacuation
+            return 2  # Phase 2: Mass Evacuation (evacuate NOW)
         else:
-            return 3  # Shelter-in-Place (too late to evacuate)
+            return 3  # Phase 3: Shelter-in-Place (too late to evacuate safely)
 
     def decide(self) -> None:
         """
