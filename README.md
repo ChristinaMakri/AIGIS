@@ -128,9 +128,9 @@ python main.py [OPTIONS]
 ```
 
 **Options:**
-- `--lat LAT` : Center latitude (default: 38.627)
-- `--lon LON` : Center longitude (default: -90.1994)
-- `--radius RADIUS` : Map radius in meters (default: 1500)
+- `--lat LAT` : Center latitude (default: 38.04)
+- `--lon LON` : Center longitude (default: 23.80)
+- `--radius RADIUS` : Map radius in meters (default: 2000)
 - `--batch N` : Run N Monte Carlo experiments (batch mode)
 - `--output FILE` : CSV output file for batch mode (default: results.csv)
 - `--mode {gui,headless}` : Visualization mode (default: gui)
@@ -141,7 +141,7 @@ python main.py [OPTIONS]
 ```bash
 python main.py
 ```
-Runs single simulation with live dashboard at St. Louis, MO.
+Runs single simulation with live dashboard at Athens, Greece (example location).
 
 #### 2. Custom Location (Los Angeles)
 ```bash
@@ -211,9 +211,9 @@ Edit `src/config.py` to customize:
 
 ### Location Parameters
 ```python
-MAP_CENTER_LAT = 38.627     # Default: St. Louis, MO
-MAP_CENTER_LON = -90.1994
-MAP_RADIUS = 1500           # meters
+DEFAULT_MAP_CENTER_LAT = 38.04   # Default: Athens, Greece (example)
+DEFAULT_MAP_CENTER_LON = 23.80
+DEFAULT_MAP_RADIUS = 2000        # meters
 GRID_HEIGHT = 100
 GRID_WIDTH = 100
 ```

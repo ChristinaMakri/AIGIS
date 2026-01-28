@@ -77,6 +77,7 @@ class CommanderAgent(Agent):
         self.current_phase = 0
         self.evacuation_ordered = False  # Flag: evacuation order sent
         self.warning_sent = False  # Flag: pre-evacuation warning sent
+        self.shelter_ordered = False  # Flag: shelter-in-place order sent
 
         # ===== ECT CALCULATION PARAMETERS =====
         # ECT = (N_agents / C_exit) × γ_congestion
@@ -362,7 +363,7 @@ class CommanderAgent(Agent):
 
         elif self.current_phase == 3:
             # Phase 3: Shelter-in-Place - TOO LATE, go to nearest safe zone
-            if not hasattr(self, 'shelter_ordered'):
+            if not self.shelter_ordered:
                 self._order_shelter_in_place()
                 self.shelter_ordered = True
 
