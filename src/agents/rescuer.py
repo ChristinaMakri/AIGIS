@@ -179,9 +179,14 @@ class RescuerAgent(Agent):
 
             target_node = environment.get_nearest_node(target_lat, target_lon)
 
-            # Calculate path using A*
+            # Calculate path using A* (single traversal)
             path = nx.shortest_path(environment.graph, self.current_node, target_node, weight='length')
-            path_length = nx.shortest_path_length(environment.graph, self.current_node, target_node, weight='length')
+
+            # Calculate path length from the computed path (avoid redundant traversal)
+            path_length = sum(
+                environment.graph[path[i]][path[i+1]][0]['length']
+                for i in range(len(path) - 1)
+            )
 
             # RISK ASSESSMENT: Scan path against fire grid
             path_risk = self._assess_path_risk(path, environment)
@@ -366,8 +371,8 @@ class RescuerAgent(Agent):
                 # Update grid position
                 self.grid_position = environment.latlon_to_grid(self.position[0], self.position[1])
 
-                # Consume fuel
-                self.fuel -= 0.1
+                # Consume fuel (prevent going negative)
+                self.fuel = max(0.0, self.fuel - 0.1)
 
             else:
                 # Reached destination

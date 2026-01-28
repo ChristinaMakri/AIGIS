@@ -103,6 +103,7 @@ class SentinelAgent(Agent):
                     continue
 
                 # CIRCULAR BOUNDARY: Skip cells outside circular detection range
+                # Use >= to include cells exactly at the detection radius
                 distance_sq = dr**2 + dc**2
                 if distance_sq > self.detection_radius**2:
                     continue

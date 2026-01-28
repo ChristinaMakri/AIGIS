@@ -87,6 +87,14 @@ ROTHERMEL_WIND_C = 0.4
 ROTHERMEL_WIND_B = 1.5
 ROTHERMEL_SLOPE_FACTOR = 5.275  # Slope coefficient
 
+# Temperature Model Parameters
+FIRE_TEMP_BURNING = 100.0  # °C - Temperature of actively burning cells
+FIRE_TEMP_COOLING_RATE = 5.0  # °C/step - Cooling rate for burnt-out cells
+FIRE_TEMP_AMBIENT = 20.0  # °C - Ambient temperature (baseline)
+
+# Logging Intervals
+WIND_LOG_INTERVAL = 10  # Steps between wind direction change logs
+
 # =============================================================================
 # AGENT COUNTS
 # =============================================================================
@@ -206,9 +214,13 @@ CIVILIAN_PANIC_BETA = 0.2  # Family separation penalty (constant stress)
 CIVILIAN_PANIC_DECAY = 0.01  # Decay rate when no fire visible (calming down)
 
 # ===== Cognitive State Thresholds =====
-CIVILIAN_PANIC_RATIONAL = 0.4  # Below: Rational behavior (optimal decisions)
-CIVILIAN_PANIC_CONFUSED = 0.7  # Below: Confused behavior (degraded performance)
-CIVILIAN_PANIC_HERDING = 0.8  # Above: Herding behavior (follows crowd)
+# 3-State Cognitive Machine:
+#   [0.0, 0.4): RATIONAL - Optimal A* pathfinding, full speed
+#   [0.4, 0.7): CONFUSED - 50% speed, frequent re-routing
+#   [0.7, 1.0]: HERDING - Follows crowd (Social Force model)
+CIVILIAN_PANIC_RATIONAL = 0.4  # Threshold: panic < 0.4 = rational behavior
+CIVILIAN_PANIC_CONFUSED = 0.7  # Threshold: panic < 0.7 = confused behavior
+# Note: panic >= 0.7 triggers herding behavior (no separate threshold needed)
 
 # ===== Speed Modifiers =====
 CIVILIAN_CONFUSED_SPEED_FACTOR = 0.5  # 50% speed reduction when confused (hesitation)
@@ -228,15 +240,8 @@ BATCH_NUM_RUNS = 10  # Default number of Monte Carlo runs
 BATCH_OUTPUT_FILE = "results.csv"
 BATCH_LOG_INTERVAL = 5  # Print progress every N runs
 
-# Metrics to track
-METRICS_TRACK = [
-    'steps_to_evacuate',
-    'mortality_rate',
-    'evacuation_success_rate',
-    'avg_panic_level',
-    'rescuer_refusals',
-    'total_burning_cells'
-]
+# Metrics are automatically tracked in simulation.py
+# See AIGISSimulation.get_results() for full list of metrics
 
 # =============================================================================
 # VISUALIZATION (GUI Mode)
