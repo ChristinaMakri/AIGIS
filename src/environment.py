@@ -50,6 +50,10 @@ class Environment:
         # Temperature grid (0-100°C, for risk assessment)
         self.temperature_grid = np.zeros_like(fuel_grid, dtype=np.float32)
 
+        # Weather parameters (can be loaded from real weather data)
+        self.temperature = 25.0  # Ambient temperature (°C)
+        self.humidity = 30.0  # Relative humidity (%)
+
         # Tracking
         self.step_count = 0
 

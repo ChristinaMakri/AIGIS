@@ -47,6 +47,9 @@ class AIGISSimulation:
         # Load real population data if available
         self._load_population_data()
 
+        # Load real weather data if available
+        self._load_weather_data()
+
         # Initialize fire simulation
         self.fire_sim = FireSimulation(self.environment)
 
@@ -95,6 +98,36 @@ class AIGISSimulation:
 
         except Exception as e:
             print(f"  ⚠️  Failed to load population data: {e}")
+
+    def _load_weather_data(self):
+        """Load real weather data if available"""
+        try:
+            from pathlib import Path
+            import json
+
+            weather_file = Path("data/current_weather.json")
+
+            if weather_file.exists():
+                # Load weather data
+                with open(weather_file, 'r') as f:
+                    weather_data = json.load(f)
+
+                # Set environment weather parameters
+                self.environment.temperature = weather_data.get('temperature', 25.0)
+                self.environment.humidity = weather_data.get('humidity', 30.0)
+
+                # Update wind speed in fire simulation if available
+                wind_speed = weather_data.get('wind_speed')
+                if wind_speed and hasattr(self, 'fire_sim'):
+                    self.fire_sim.wind_speed = wind_speed
+
+                print(f"  ✅ Loaded real weather data: {self.environment.temperature:.1f}°C, "
+                      f"{self.environment.humidity:.0f}% humidity, wind {wind_speed:.1f} m/s")
+            else:
+                print(f"  ℹ️  No weather data found. Run 'python fetch_real_weather.py' to fetch real data.")
+
+        except Exception as e:
+            print(f"  ⚠️  Failed to load weather data: {e}")
 
     def _initialize_agents(self) -> Dict[str, Any]:
         """Create all 5 agent types"""

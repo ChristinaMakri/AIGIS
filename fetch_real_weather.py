@@ -54,9 +54,14 @@ def get_real_weather(latitude, longitude):
         # Extract current weather
         current = data.get('current_weather', {})
 
+        # Convert wind speed from km/h to m/s for consistency with simulation
+        wind_speed_kmh = current.get('windspeed', 5.0)
+        wind_speed_ms = wind_speed_kmh / 3.6  # km/h to m/s conversion
+
         weather_data = {
             'temperature': current.get('temperature', 25.0),  # °C
-            'wind_speed': current.get('windspeed', 5.0),  # km/h
+            'wind_speed': wind_speed_ms,  # m/s (converted from km/h)
+            'wind_speed_kmh': wind_speed_kmh,  # km/h (original for reference)
             'wind_direction': current.get('winddirection', 90.0),  # degrees
             'time': current.get('time', datetime.now().isoformat()),
             'weathercode': current.get('weathercode', 0)
@@ -73,7 +78,7 @@ def get_real_weather(latitude, longitude):
         print(f"   ✅ Weather data retrieved")
         print(f"\n   Current conditions:")
         print(f"     Temperature:  {weather_data['temperature']:.1f}°C")
-        print(f"     Wind speed:   {weather_data['wind_speed']:.1f} km/h")
+        print(f"     Wind speed:   {weather_data['wind_speed']:.1f} m/s ({weather_data['wind_speed_kmh']:.1f} km/h)")
         print(f"     Wind dir:     {weather_data['wind_direction']:.0f}°")
         print(f"     Humidity:     {weather_data.get('humidity', 'N/A')}%")
         print(f"     Precipitation: {weather_data.get('precipitation', 0):.1f} mm")
