@@ -1,5 +1,5 @@
 """
-Location-Agnostic Environment Builder with Perlin Noise Terrain
+Location-Agnostic Environment Builder with Real SRTM Elevation or Perlin Noise Terrain
 Dynamically identifies safe zones using OSM tags and map perimeter
 """
 import numpy as np
@@ -7,9 +7,21 @@ import osmnx as ox
 import networkx as nx
 from typing import Tuple, Dict, List, Set
 from shapely.geometry import Point
-from noise import pnoise2
 import warnings
 warnings.filterwarnings('ignore')
+
+# Optional Perlin noise for terrain generation
+try:
+    from noise import pnoise2
+    NOISE_AVAILABLE = True
+except ImportError:
+    NOISE_AVAILABLE = False
+    # Fallback: simple random elevation
+    def pnoise2(x, y, octaves=1, persistence=0.5, lacunarity=2.0,
+                repeatx=None, repeaty=None, base=0):
+        """Fallback random elevation when noise module unavailable"""
+        np.random.seed(int(x * 1000 + y * 1000))
+        return np.random.uniform(-1, 1)
 
 from .config import (
     PERLIN_SCALE,
@@ -172,7 +184,8 @@ class Environment:
 class LiveMapBuilder:
     """
     Location-Agnostic Environment Builder.
-    Generates terrain using Perlin Noise and identifies safe zones dynamically.
+    Generates terrain using real SRTM elevation data (when available) or Perlin Noise fallback.
+    Identifies safe zones dynamically from OSM tags and map perimeter.
     """
 
     def __init__(self, center_lat: float, center_lon: float,
@@ -209,8 +222,8 @@ class LiveMapBuilder:
         fuel_grid = self._rasterize_features(forest_geometries, bounds)
         obstacle_grid = self._rasterize_features(building_geometries, bounds)
 
-        # Step 5: Generate Perlin Noise elevation
-        print("  ⛰️  Generating Perlin Noise terrain...")
+        # Step 5: Generate elevation (real SRTM data or Perlin Noise fallback)
+        print("  ⛰️  Loading terrain elevation...")
         elevation_grid = self._generate_perlin_terrain()
 
         # Step 6: Identify safe zones
@@ -347,9 +360,47 @@ class LiveMapBuilder:
 
     def _generate_perlin_terrain(self) -> np.ndarray:
         """
-        Generate realistic terrain using Perlin Noise.
+        Generate realistic terrain using real SRTM elevation data or Perlin Noise fallback.
         Returns elevation grid in meters.
         """
+        # Try to load real elevation data first
+        from pathlib import Path
+        elevation_file = Path("data/elevation_data.npz")
+
+        if elevation_file.exists():
+            try:
+                print("  📊 Loading real SRTM elevation data...")
+                elev_data = np.load(elevation_file)
+
+                # Check if location matches (within reasonable tolerance)
+                saved_lat = float(elev_data['latitude'])
+                saved_lon = float(elev_data['longitude'])
+                saved_radius = float(elev_data['radius'])
+
+                lat_diff = abs(saved_lat - self.center[0])
+                lon_diff = abs(saved_lon - self.center[1])
+                radius_diff = abs(saved_radius - self.radius)
+
+                # Allow 0.1 degree (~11km) and 20% radius difference
+                if lat_diff < 0.1 and lon_diff < 0.1 and radius_diff < self.radius * 0.2:
+                    elevation_grid = elev_data['elevation_grid']
+
+                    # Resize to match current grid_size if needed
+                    if elevation_grid.shape != self.grid_size:
+                        from scipy.ndimage import zoom
+                        scale_y = self.grid_size[0] / elevation_grid.shape[0]
+                        scale_x = self.grid_size[1] / elevation_grid.shape[1]
+                        elevation_grid = zoom(elevation_grid, (scale_y, scale_x), order=1)
+
+                    print(f"  ✅ Real elevation data loaded (min: {elevation_grid.min():.1f}m, max: {elevation_grid.max():.1f}m)")
+                    return elevation_grid.astype(np.float32)
+                else:
+                    print(f"  ⚠️  Elevation data location mismatch, generating new terrain...")
+            except Exception as e:
+                print(f"  ⚠️  Could not load elevation data ({e}), using fallback...")
+
+        # Fallback: Generate Perlin Noise terrain
+        print("  🎲 Generating Perlin Noise terrain (fallback)...")
         elevation = np.zeros(self.grid_size, dtype=np.float32)
 
         for y in range(self.grid_size[0]):

@@ -11,7 +11,8 @@ AIGIS creates a "Digital Twin" of any geographic area using live OpenStreetMap d
 ## Key Features
 
 ### 🌍 Location-Agnostic System
-- **Perlin Noise Terrain**: Realistic elevation generation without hardcoded gradients
+- **Real SRTM Elevation**: Uses NASA's Shuttle Radar Topography Mission data (~30m resolution)
+- **Perlin Noise Fallback**: Generates realistic terrain when real data unavailable
 - **OSM Safe Zone Detection**: Automatically identifies water bodies, parks, squares, and map edges
 - **Universal Deployment**: Works at any location globally
 
@@ -45,6 +46,7 @@ AIGIS creates a "Digital Twin" of any geographic area using live OpenStreetMap d
 - **Historical Fire Data**: Real wildfire incidents from NIFC (2010-2018)
 - **Real Population Data**: OpenStreetMap building footprints and density estimation
 - **Live Weather API**: Real-time weather from Open-Meteo (temperature, wind, humidity)
+- **Real Elevation Data**: SRTM terrain data from Open-Elevation API (replaces Perlin noise)
 - **ML Predictions**: XGBoost and Random Forest models for casualty and evacuation forecasting
 - **Data-Driven Decisions**: Commander agent enhanced with historical pattern matching
 
@@ -188,10 +190,13 @@ python get_population_data.py
 # 3. Fetch current weather conditions (Open-Meteo API)
 python fetch_real_weather.py
 
-# 4. Train ML models (XGBoost + Random Forest)
+# 4. Fetch real elevation data (SRTM via Open-Elevation API)
+python fetch_real_elevation.py
+
+# 5. Train ML models (XGBoost + Random Forest)
 python train_models.py
 
-# 5. Run simulation (automatically uses trained models)
+# 6. Run simulation (automatically uses trained models and real data)
 python main.py
 ```
 
@@ -204,6 +209,7 @@ python main.py
 - Historical fires: National Interagency Fire Center (NIFC)
 - Population: OpenStreetMap building footprints
 - Weather: Open-Meteo API (free, no API key)
+- Elevation: SRTM via Open-Elevation API (free, ~30m resolution)
 
 ### Docker Deployment
 
@@ -230,11 +236,12 @@ AIGIS/
 ├── collect_fire_data.py      # Historical fire data collection (NIFC API)
 ├── get_population_data.py    # Real population from OpenStreetMap
 ├── fetch_real_weather.py     # Live weather from Open-Meteo API
+├── fetch_real_elevation.py   # Real elevation data from SRTM
 ├── train_models.py           # ML model training pipeline
 └── src/
     ├── config.py             # Configuration constants
     ├── message.py            # FIPA-ACL message implementation
-    ├── environment.py        # LiveMapBuilder with Perlin terrain
+    ├── environment.py        # LiveMapBuilder with SRTM or Perlin terrain
     ├── fire_simulation.py    # Fire model with dynamic wind
     ├── simulation.py         # Main simulation engine with metrics
     ├── dashboard.py          # 3-panel professional dashboard
