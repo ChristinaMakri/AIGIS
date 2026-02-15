@@ -206,10 +206,18 @@ class FireSimulation:
 
         # ===== STEP 2: VECTORIZED BURNOUT =====
         # Burning cells have a probability to burn out and transition to state 2
-        # Vectorized: processes all burning cells simultaneously without loops
+        # Different fuel types burn out at different rates (grass faster than timber)
+        from .config import FUEL_MODELS
         burning_mask = (fire_grid == 1)  # Boolean mask of all burning cells
         burnout_random = np.random.random((rows, cols))  # Random values for each cell
-        burnout_mask = burning_mask & (burnout_random < FIRE_BURNOUT_PROB)
+
+        # Apply fuel-specific burnout probabilities
+        burnout_prob_grid = np.full((rows, cols), FIRE_BURNOUT_PROB)
+        for fuel_id, fuel_props in FUEL_MODELS.items():
+            fuel_mask = (self.environment.fuel_type_grid == fuel_id)
+            burnout_prob_grid[fuel_mask] = fuel_props['burnout_prob']
+
+        burnout_mask = burning_mask & (burnout_random < burnout_prob_grid)
         new_fire_grid[burnout_mask] = 2  # State 2 = Burnt out
 
         # Track cells still burning (didn't burn out this step)
@@ -357,10 +365,21 @@ class FireSimulation:
         # Linear increase: 10% per burning neighbor
         neighbor_factor = 1.0 + (neighbor_counts * 0.1)
 
+        # ===== STEP 5.5: FUEL TYPE FACTOR =====
+        # Different fuel types burn at different rates (NFFL models)
+        # Get fuel type multipliers from environment
+        from .config import FUEL_MODELS
+        fuel_type_factor = np.ones_like(base_prob)
+
+        # Apply fuel-specific spread multipliers
+        for fuel_id, fuel_props in FUEL_MODELS.items():
+            fuel_mask = (self.environment.fuel_type_grid == fuel_id)
+            fuel_type_factor[fuel_mask] = fuel_props['spread_multiplier']
+
         # ===== STEP 6: COMBINED PROBABILITY =====
-        # Rothermel multiplicative model: ROS = R_base × (1+φ_wind) × (1+φ_slope)
-        # We add neighbor effect as additional multiplier
-        spread_probs = base_prob * wind_factor * slope_factor * neighbor_factor
+        # Rothermel multiplicative model: ROS = R_base × (1+φ_wind) × (1+φ_slope) × fuel_type
+        # We add neighbor effect and fuel type as additional multipliers
+        spread_probs = base_prob * wind_factor * slope_factor * neighbor_factor * fuel_type_factor
 
         # Clip to valid probability range [0, 1]
         # Multiply by shifted_burning to zero out cells without burning source
