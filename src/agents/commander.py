@@ -2,9 +2,10 @@
 Commander Agent - Hybrid / Utility-Based Architecture
 Makes strategic decisions using ECT (Evacuation Clearance Time) vs TTI logic
 Implements 4-phase protocol: Monitoring, Pre-Evacuation, Mass Evacuation, Shelter-in-Place
+Enhanced with ML predictions from real historical fire data
 """
 import numpy as np
-from typing import Dict, List, Tuple
+from typing import Dict, List, Tuple, Optional
 from .base_agent import Agent
 from ..message import Message
 from ..config import (
@@ -16,6 +17,13 @@ from ..config import (
     COMMANDER_REEVALUATION_INTERVAL,
     LOG_PHASE_TRANSITIONS
 )
+
+# ML integration
+try:
+    from ..ml_predictor import RiskPredictor, ML_AVAILABLE
+except ImportError:
+    ML_AVAILABLE = False
+    RiskPredictor = None
 
 
 class CommanderAgent(Agent):
@@ -89,6 +97,20 @@ class CommanderAgent(Agent):
         self.w_safety = 0.6  # Weight for safety (low risk paths)
         self.w_cost = 0.2  # Weight for cost (ETA, distance)
         self.w_congestion = 0.2  # Weight for congestion avoidance
+
+        # ===== ML PREDICTION INTEGRATION =====
+        # Initialize ML predictor for enhanced risk assessment using real historical fire data
+        self.risk_predictor: Optional[RiskPredictor] = None
+        self.ml_predictions: Dict = {}
+        self.environment = None  # Store environment reference for ML predictions
+
+        if ML_AVAILABLE and RiskPredictor:
+            try:
+                self.risk_predictor = RiskPredictor()
+                if self.risk_predictor.is_trained:
+                    print(f"  🤖 {self.agent_id}: ML predictor initialized")
+            except Exception as e:
+                print(f"  ⚠️  {self.agent_id}: ML predictor initialization failed: {e}")
 
     def perceive(self, environment) -> None:
         """
@@ -250,9 +272,42 @@ class CommanderAgent(Agent):
         """
         Re-evaluate current strategy based on ECT vs TTI.
         This implements "Commitment with Evaluation".
+        Enhanced with ML predictions from real historical fire data.
         """
         # Update congestion factor based on active missions
         self.congestion_factor = COMMANDER_CONGESTION_FACTOR_BASE + (len(self.active_missions) * 0.1)
+
+        # Use ML predictions if available
+        if ML_AVAILABLE and self.risk_predictor and hasattr(self, 'environment') and self.environment:
+            try:
+                # Count evacuated civilians
+                agents = getattr(self.environment, 'agents', None)
+                if agents and 'civilians' in agents:
+                    total_civilians = len(agents['civilians'])
+                    evacuated = sum(1 for c in agents['civilians'] if not c.is_active)
+                else:
+                    total_civilians = 20
+                    evacuated = 0
+
+                # Get ML predictions based on current state
+                self.ml_predictions = self.risk_predictor.predict_casualty_risk(
+                    fire_grid=self.environment.fire_grid,
+                    population_density=getattr(self.environment, 'population_density', np.zeros_like(self.environment.fire_grid)),
+                    wind_speed=self.environment.wind_speed,
+                    temperature=getattr(self.environment, 'temperature', 25.0),
+                    humidity=getattr(self.environment, 'humidity', 30.0),
+                    evacuation_status={'evacuated': evacuated, 'total': total_civilians}
+                )
+
+                # Log ML predictions periodically (every 20 steps)
+                if len(self.risk_history) % 20 == 0 and self.ml_predictions:
+                    print(f"  🤖 ML Predictions: Risk={self.ml_predictions.get('risk_level', 'N/A')}, "
+                          f"Casualties={self.ml_predictions.get('predicted_casualties', 0):.1f}, "
+                          f"Evacuations={self.ml_predictions.get('predicted_evacuations', 0):.0f}")
+
+            except Exception as e:
+                # Silently handle ML prediction errors - fallback to physics-based predictions
+                pass
 
     def _select_best_proposal(self, cfp_id: str, proposals: List[Message]) -> None:
         """
@@ -320,6 +375,9 @@ class CommanderAgent(Agent):
         Execute decisions based on current phase.
         Implements 4-phase protocol based on ECT vs TTI.
         """
+        # Store environment reference for ML predictions
+        self.environment = environment
+
         # Calculate ECT - count actual active civilians from environment
         # Access simulation's agent list through environment.agents
         agents = getattr(environment, 'agents', None)

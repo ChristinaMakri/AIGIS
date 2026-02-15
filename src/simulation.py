@@ -44,6 +44,9 @@ class AIGISSimulation:
         builder = LiveMapBuilder(lat, lon, radius, (GRID_HEIGHT, GRID_WIDTH))
         self.environment = builder.build()
 
+        # Load real population data if available
+        self._load_population_data()
+
         # Initialize fire simulation
         self.fire_sim = FireSimulation(self.environment)
 
@@ -65,6 +68,33 @@ class AIGISSimulation:
         }
 
         self.step = 0
+
+    def _load_population_data(self):
+        """Load real population data from OSM if available"""
+        try:
+            from pathlib import Path
+            pop_file = Path("data/population_data.npz")
+
+            if pop_file.exists():
+                # Load population data
+                pop_data = np.load(pop_file)
+                pop_grid = pop_data["population_grid"]
+
+                # Resize if needed to match simulation grid
+                if pop_grid.shape != self.environment.grid_shape:
+                    from scipy.ndimage import zoom
+                    scale_y = self.environment.grid_shape[0] / pop_grid.shape[0]
+                    scale_x = self.environment.grid_shape[1] / pop_grid.shape[1]
+                    pop_grid = zoom(pop_grid, (scale_y, scale_x), order=1)
+
+                self.environment.population_density = pop_grid
+                total_pop = int(pop_grid.sum())
+                print(f"  ✅ Loaded real population data: {total_pop:,} people")
+            else:
+                print(f"  ℹ️  No population data found. Run 'python get_population_data.py' to fetch real data.")
+
+        except Exception as e:
+            print(f"  ⚠️  Failed to load population data: {e}")
 
     def _initialize_agents(self) -> Dict[str, Any]:
         """Create all 5 agent types"""

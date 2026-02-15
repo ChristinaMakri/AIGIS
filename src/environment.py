@@ -39,6 +39,9 @@ class Environment:
         self.grid_shape = grid_shape
         self.safe_nodes = safe_nodes  # Set of node IDs that are safe zones
 
+        # Population density grid (loaded from real OSM data)
+        self.population_density = np.zeros(grid_shape)
+
         # Fire state grids
         self.fire_grid = np.zeros_like(fuel_grid, dtype=np.int8)
         # 0 = no fuel, 1 = burning, 2 = burnt out, 3 = fuel
