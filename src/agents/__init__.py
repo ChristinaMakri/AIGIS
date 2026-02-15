@@ -7,6 +7,7 @@ from .analyst import AnalystAgent
 from .commander import CommanderAgent
 from .rescuer import RescuerAgent
 from .civilian import CivilianAgent
+from .firefighter import FirefighterAgent
 
 __all__ = [
     'Agent',
@@ -14,5 +15,6 @@ __all__ = [
     'AnalystAgent',
     'CommanderAgent',
     'RescuerAgent',
-    'CivilianAgent'
+    'CivilianAgent',
+    'FirefighterAgent'
 ]

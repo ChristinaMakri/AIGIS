@@ -146,6 +146,36 @@ class FireSimulation:
             self.environment.fire_grid[row, col] = 1  # State 1 = Burning
             print(f"🔥 Fire ignited at grid position ({row}, {col})")
 
+    def ignite_at_locations(self, fire_locations: list) -> None:
+        """
+        Ignite fires at specific lat/lon coordinates (e.g., from NASA FIRMS data).
+
+        Args:
+            fire_locations: List of (latitude, longitude) tuples
+
+        Example:
+            fire_sim.ignite_at_locations([
+                (38.0365, 23.7281),  # Fire location 1
+                (38.0456, 23.7352)   # Fire location 2
+            ])
+        """
+        print(f"🛰️  Igniting {len(fire_locations)} fires from satellite data...")
+
+        for lat, lon in fire_locations:
+            # Convert lat/lon to grid coordinates
+            row, col = self.environment.latlon_to_grid(lat, lon)
+
+            # Check if location is valid and has fuel
+            if (0 <= row < self.environment.grid_shape[0] and
+                0 <= col < self.environment.grid_shape[1] and
+                self.environment.fire_grid[row, col] == 3):
+
+                # Ignite fire
+                self.environment.fire_grid[row, col] = 1
+                print(f"  🔥 Fire ignited at ({lat:.4f}, {lon:.4f}) → grid ({row}, {col})")
+            else:
+                print(f"  ⚠️  Cannot ignite at ({lat:.4f}, {lon:.4f}) - no fuel or out of bounds")
+
     def step(self) -> None:
         """
         Execute one step of fire propagation with dynamic wind.

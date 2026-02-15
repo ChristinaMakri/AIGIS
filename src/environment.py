@@ -42,6 +42,13 @@ class Environment:
         # Population density grid (loaded from real OSM data)
         self.population_density = np.zeros(grid_shape)
 
+        # Fuel type grid (NFFL fuel models 1-10)
+        # Default: fuel model 5 (Low Brush)
+        from .config import DEFAULT_FUEL_MODEL
+        self.fuel_type_grid = np.full(grid_shape, DEFAULT_FUEL_MODEL, dtype=np.int8)
+        # Set no-fuel areas to 0
+        self.fuel_type_grid[fuel_grid == 0] = 0
+
         # Fire state grids
         self.fire_grid = np.zeros_like(fuel_grid, dtype=np.int8)
         # 0 = no fuel, 1 = burning, 2 = burnt out, 3 = fuel

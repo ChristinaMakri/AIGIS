@@ -9,7 +9,7 @@ from .fire_simulation import FireSimulation
 from .message import Message
 from .agents import (
     SentinelAgent, AnalystAgent, CommanderAgent,
-    RescuerAgent, CivilianAgent
+    RescuerAgent, FirefighterAgent, CivilianAgent
 )
 from .config import *
 
@@ -130,12 +130,13 @@ class AIGISSimulation:
             print(f"  ⚠️  Failed to load weather data: {e}")
 
     def _initialize_agents(self) -> Dict[str, Any]:
-        """Create all 5 agent types"""
+        """Create all 6 agent types"""
         agents = {
             'sentinels': [],
             'analyst': None,
             'commander': None,
             'rescuers': [],
+            'firefighters': [],
             'civilians': []
         }
 
@@ -175,6 +176,19 @@ class AIGISSimulation:
             rescuer = RescuerAgent(f"rescuer_{i}", (lat, lon))
             rescuer.grid_position = self.environment.latlon_to_grid(lat, lon)
             agents['rescuers'].append(rescuer)
+
+        # Firefighter agents - positioned strategically
+        print(f"  🚒 Creating {NUM_FIREFIGHTERS} Firefighter agents...")
+        for i in range(NUM_FIREFIGHTERS):
+            # Position firefighters near edges for better coverage
+            angle = (2 * np.pi * i) / NUM_FIREFIGHTERS
+            offset = 0.3
+            lat = center_lat + offset * (max_lat - min_lat) * np.sin(angle)
+            lon = center_lon + offset * (max_lon - min_lon) * np.cos(angle)
+
+            firefighter = FirefighterAgent(f"firefighter_{i}", (lat, lon))
+            firefighter.grid_position = self.environment.latlon_to_grid(lat, lon)
+            agents['firefighters'].append(firefighter)
 
         # Civilian agents - random positions
         print(f"  🏃 Creating {NUM_CIVILIANS} Civilian agents...")
@@ -225,6 +239,10 @@ class AIGISSimulation:
         # Update rescuers
         for rescuer in self.agents['rescuers']:
             rescuer.update(self.environment)
+
+        # Update firefighters
+        for firefighter in self.agents['firefighters']:
+            firefighter.update(self.environment)
 
         # Update civilians
         for civilian in self.agents['civilians']:

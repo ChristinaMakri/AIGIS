@@ -92,6 +92,83 @@ FIRE_TEMP_BURNING = 100.0  # °C - Temperature of actively burning cells
 FIRE_TEMP_COOLING_RATE = 5.0  # °C/step - Cooling rate for burnt-out cells
 FIRE_TEMP_AMBIENT = 20.0  # °C - Ambient temperature (baseline)
 
+# =============================================================================
+# FUEL TYPE MODELS (NFFL - Northern Forest Fire Laboratory)
+# =============================================================================
+
+# Fuel Model Definitions
+# Based on Anderson's 13 Fire Behavior Fuel Models
+FUEL_MODELS = {
+    # Grass Fuels (fast spread, low intensity)
+    1: {  # Short Grass (1 foot)
+        'name': 'Short Grass',
+        'spread_multiplier': 1.5,  # Spreads 50% faster than base
+        'intensity_multiplier': 0.6,  # Lower intensity
+        'burnout_prob': 0.2  # Burns out faster
+    },
+    2: {  # Timber (grass and understory)
+        'name': 'Timber Grass',
+        'spread_multiplier': 1.3,
+        'intensity_multiplier': 0.8,
+        'burnout_prob': 0.15
+    },
+    3: {  # Tall Grass (2.5 feet)
+        'name': 'Tall Grass',
+        'spread_multiplier': 1.8,
+        'intensity_multiplier': 0.9,
+        'burnout_prob': 0.18
+    },
+
+    # Brush Fuels (medium spread, high intensity)
+    4: {  # Chaparral (6 feet)
+        'name': 'Chaparral',
+        'spread_multiplier': 1.2,
+        'intensity_multiplier': 1.5,
+        'burnout_prob': 0.08
+    },
+    5: {  # Brush (2 feet)
+        'name': 'Low Brush',
+        'spread_multiplier': 1.0,
+        'intensity_multiplier': 1.2,
+        'burnout_prob': 0.10
+    },
+    6: {  # Dormant Brush
+        'name': 'Dormant Brush',
+        'spread_multiplier': 1.4,
+        'intensity_multiplier': 1.3,
+        'burnout_prob': 0.12
+    },
+    7: {  # Southern Rough
+        'name': 'Southern Rough',
+        'spread_multiplier': 1.1,
+        'intensity_multiplier': 1.4,
+        'burnout_prob': 0.09
+    },
+
+    # Timber Fuels (slow spread, extreme intensity)
+    8: {  # Closed Timber Litter
+        'name': 'Closed Timber',
+        'spread_multiplier': 0.6,
+        'intensity_multiplier': 1.8,
+        'burnout_prob': 0.05
+    },
+    9: {  # Hardwood Litter
+        'name': 'Hardwood Litter',
+        'spread_multiplier': 0.7,
+        'intensity_multiplier': 1.6,
+        'burnout_prob': 0.06
+    },
+    10: {  # Timber (litter and understory)
+        'name': 'Dense Timber',
+        'spread_multiplier': 0.8,
+        'intensity_multiplier': 2.0,
+        'burnout_prob': 0.04
+    }
+}
+
+# Default fuel model (used if not specified)
+DEFAULT_FUEL_MODEL = 5  # Low Brush (moderate characteristics)
+
 # Logging Intervals
 WIND_LOG_INTERVAL = 10  # Steps between wind direction change logs
 
@@ -103,6 +180,7 @@ NUM_SENTINELS = 4
 NUM_ANALYSTS = 1  # Typically one central analyst
 NUM_COMMANDERS = 1
 NUM_RESCUERS = 3
+NUM_FIREFIGHTERS = 2  # Firefighting units for active suppression
 NUM_CIVILIANS = 20
 
 # =============================================================================
