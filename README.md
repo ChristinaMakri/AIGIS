@@ -41,6 +41,13 @@ AIGIS creates a "Digital Twin" of any geographic area using live OpenStreetMap d
 - **CSV Export**: Pandas DataFrame with all metrics
 - **Statistical Analysis**: Mean ± std, min/max ranges automatically calculated
 
+### 🤖 Machine Learning & Real Data Integration
+- **Historical Fire Data**: Real wildfire incidents from NIFC (2010-2018)
+- **Real Population Data**: OpenStreetMap building footprints and density estimation
+- **Live Weather API**: Real-time weather from Open-Meteo (temperature, wind, humidity)
+- **ML Predictions**: XGBoost and Random Forest models for casualty and evacuation forecasting
+- **Data-Driven Decisions**: Commander agent enhanced with historical pattern matching
+
 ## Agent Types
 
 ### 1. Sentinel Agent (Reactive Architecture)
@@ -167,6 +174,37 @@ python main.py --batch 1000 --mode headless --output hpc_results.csv
 ```
 Runs 1000 simulations without GUI for high-performance computing environments.
 
+### Machine Learning Setup (Optional)
+
+To enable ML predictions with real historical data:
+
+```bash
+# 1. Collect historical fire data (NIFC 2010-2018)
+python collect_fire_data.py
+
+# 2. Collect real population data (OpenStreetMap)
+python get_population_data.py
+
+# 3. Fetch current weather conditions (Open-Meteo API)
+python fetch_real_weather.py
+
+# 4. Train ML models (XGBoost + Random Forest)
+python train_models.py
+
+# 5. Run simulation (automatically uses trained models)
+python main.py
+```
+
+**What it does:**
+- Trains 4 ML models: Casualty Risk, Evacuation Count, Containment Time, Financial Cost
+- Commander agent gets ML predictions every 10 steps: `🤖 ML Predictions: Risk=HIGH, Casualties=12.1`
+- Combines physics-based (Rothermel) + data-driven (ML) decision making
+
+**Data sources:**
+- Historical fires: National Interagency Fire Center (NIFC)
+- Population: OpenStreetMap building footprints
+- Weather: Open-Meteo API (free, no API key)
+
 ### Docker Deployment
 
 ```bash
@@ -189,6 +227,10 @@ AIGIS/
 ├── PHYSICS_MODELS.md         # Scientific model documentation
 ├── Dockerfile                # Docker configuration
 ├── docker-compose.yml        # Docker Compose setup
+├── collect_fire_data.py      # Historical fire data collection (NIFC API)
+├── get_population_data.py    # Real population from OpenStreetMap
+├── fetch_real_weather.py     # Live weather from Open-Meteo API
+├── train_models.py           # ML model training pipeline
 └── src/
     ├── config.py             # Configuration constants
     ├── message.py            # FIPA-ACL message implementation
@@ -196,11 +238,12 @@ AIGIS/
     ├── fire_simulation.py    # Fire model with dynamic wind
     ├── simulation.py         # Main simulation engine with metrics
     ├── dashboard.py          # 3-panel professional dashboard
+    ├── ml_predictor.py       # ML prediction integration module
     └── agents/
         ├── base_agent.py     # Abstract base agent
         ├── sentinel.py       # Reactive agent (Signal Detection)
         ├── analyst.py        # Model-based agent (Rothermel + Fuzzy)
-        ├── commander.py      # Hybrid agent (ECT vs TTI)
+        ├── commander.py      # Hybrid agent (ECT vs TTI + ML)
         ├── rescuer.py        # Goal-based agent (Contract Net)
         └── civilian.py       # BDI agent (Greenshields + Social Force)
 ```

@@ -50,6 +50,7 @@ Thumbs.db
 
 # Project specific
 data/
+models/
 output/
 results/
 *.csv
