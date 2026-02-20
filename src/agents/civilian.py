@@ -63,7 +63,6 @@ class CivilianAgent(Agent):
         # Desires: Goals the agent wants to achieve (fixed: survive)
         # Intentions: Committed plans to achieve desires (current path)
         self.beliefs: Set[str] = set()  # Known facts ('warning_received', 'fire_nearby', etc.)
-        self.desires: List[str] = ['survive', 'reach_safety']  # High-level goals
         self.intentions: List[str] = []  # Current active plan
 
         # ===== PANIC MODEL (Distance-based with Family Factor) =====
@@ -540,7 +539,6 @@ class CivilianAgent(Agent):
                     return  # Skip movement this step, recalculate next step
 
                 # Path is clear, move to next node
-                old_node = self.current_node
                 self.current_node = next_node
                 self.current_path.pop(0)
 

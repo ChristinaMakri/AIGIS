@@ -60,12 +60,18 @@ class AIGISSimulation:
         # This allows Commander to count active civilians for accurate ECT
         self.environment.agents = self.agents
 
+        # Give commander a reference to the fire simulation for ML feature extraction
+        if self.agents['commander']:
+            self.agents['commander'].fire_sim_ref = self.fire_sim
+
         # Metrics tracking
         self.metrics = {
             'casualties': [],
             'evacuated': [],
             'panic_levels': [],
             'active_fires': [],
+            'burnt_cells': [],
+            'panic_snapshots': [],
             'phase_history': [],
             'rescuer_refusals': 0
         }
@@ -121,8 +127,9 @@ class AIGISSimulation:
                 if wind_speed and hasattr(self, 'fire_sim'):
                     self.fire_sim.wind_speed = wind_speed
 
+                wind_str = f"{wind_speed:.1f} m/s" if wind_speed is not None else "N/A"
                 print(f"  ✅ Loaded real weather data: {self.environment.temperature:.1f}°C, "
-                      f"{self.environment.humidity:.0f}% humidity, wind {wind_speed:.1f} m/s")
+                      f"{self.environment.humidity:.0f}% humidity, wind {wind_str}")
             else:
                 print(f"  ℹ️  No weather data found. Run 'python fetch_real_weather.py' to fetch real data.")
 
@@ -333,9 +340,18 @@ class AIGISSimulation:
             avg_panic = 0.0
         self.metrics['panic_levels'].append(avg_panic)
 
-        # Active fire cells
+        # Active fire cells + burnt cells
         fire_stats = self.fire_sim.get_fire_statistics()
         self.metrics['active_fires'].append(fire_stats['burning_cells'])
+        self.metrics['burnt_cells'].append(fire_stats['burnt_cells'])
+
+        # Per-step panic snapshot
+        if self.agents['civilians']:
+            self.metrics['panic_snapshots'].append(
+                [c.panic_level for c in self.agents['civilians'] if c.is_active]
+            )
+        else:
+            self.metrics['panic_snapshots'].append([])
 
         # Commander phase
         if self.agents['commander']:
@@ -409,6 +425,10 @@ class AIGISSimulation:
         casualties = self.count_casualties()
         evacuated = self.count_evacuated()
 
+        reconsideration_log = []
+        if self.agents['commander']:
+            reconsideration_log = self.agents['commander'].reconsideration_log
+
         return {
             'steps': self.step,
             'steps_to_evacuate': self.step,
@@ -422,5 +442,15 @@ class AIGISSimulation:
             'rescuer_refusals': self.metrics['rescuer_refusals'],
             'total_burning_cells': sum(self.metrics['active_fires']),
             'max_fire_cells': max(self.metrics['active_fires']) if self.metrics['active_fires'] else 0,
-            'final_phase': self.agents['commander'].current_phase if self.agents['commander'] else 0
+            'final_phase': self.agents['commander'].current_phase if self.agents['commander'] else 0,
+            'reconsideration_log': reconsideration_log,
+            'history': {
+                'casualties': self.metrics['casualties'],
+                'evacuated': self.metrics['evacuated'],
+                'panic_levels': self.metrics['panic_levels'],
+                'active_fires': self.metrics['active_fires'],
+                'burnt_cells': self.metrics['burnt_cells'],
+                'panic_snapshots': self.metrics['panic_snapshots'],
+                'phase_history': self.metrics['phase_history'],
+            }
         }

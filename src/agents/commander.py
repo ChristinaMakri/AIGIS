@@ -15,7 +15,11 @@ from ..config import (
     COMMANDER_PHASE_PREALERT_MULTIPLIER,
     COMMANDER_PHASE_EVACUATE_MULTIPLIER,
     COMMANDER_REEVALUATION_INTERVAL,
-    LOG_PHASE_TRANSITIONS
+    COMMANDER_TTI_RECONSIDER_THRESHOLD,
+    COMMANDER_ECT_RECONSIDER_THRESHOLD,
+    LOG_PHASE_TRANSITIONS,
+    MAX_STEPS,
+    WIND_SPEED
 )
 
 # ML integration
@@ -98,6 +102,16 @@ class CommanderAgent(Agent):
         self.w_cost = 0.2  # Weight for cost (ETA, distance)
         self.w_congestion = 0.2  # Weight for congestion avoidance
 
+        # ===== COMMITMENT WITH EVALUATION STATE =====
+        self.committed_at_tti = float('inf')   # TTI when last phase was committed
+        self.committed_at_ect = 0.0            # ECT when last phase was committed
+        self.committed_phase = 0               # Phase at last commitment
+        self.commitment_step = 0               # Step at last commitment
+        self.reconsideration_log: list = []    # List of {step, reason, tti, ect}
+
+        # Reference to fire simulation (set by simulation.py after init)
+        self.fire_sim_ref = None
+
         # ===== ML PREDICTION INTEGRATION =====
         # Initialize ML predictor for enhanced risk assessment using real historical fire data
         self.risk_predictor: Optional[RiskPredictor] = None
@@ -108,9 +122,9 @@ class CommanderAgent(Agent):
             try:
                 self.risk_predictor = RiskPredictor()
                 if self.risk_predictor.is_trained:
-                    print(f"  🤖 {self.agent_id}: ML predictor initialized")
+                    print(f"  ML predictor initialized for {self.agent_id}")
             except Exception as e:
-                print(f"  ⚠️  {self.agent_id}: ML predictor initialization failed: {e}")
+                pass  # Silently degrade if ML unavailable
 
     def perceive(self, environment) -> None:
         """
@@ -252,14 +266,52 @@ class CommanderAgent(Agent):
         else:
             return 3  # Phase 3: Shelter-in-Place (too late to evacuate safely)
 
+    def _should_reconsider_commitment(self) -> bool:
+        """
+        Determine whether the current commitment should be re-evaluated.
+
+        Returns True if:
+        - First call (committed_at_tti == inf)
+        - TTI has drifted beyond COMMANDER_TTI_RECONSIDER_THRESHOLD
+        - ECT has drifted beyond COMMANDER_ECT_RECONSIDER_THRESHOLD
+        """
+        if self.committed_at_tti == float('inf'):
+            return True
+
+        tti_drift = abs(self.tti - self.committed_at_tti)
+        ect_drift = abs(self.ect - self.committed_at_ect)
+
+        if tti_drift > COMMANDER_TTI_RECONSIDER_THRESHOLD:
+            self.reconsideration_log.append({
+                'step': len(self.risk_history),
+                'reason': 'tti_drift',
+                'tti': self.tti,
+                'ect': self.ect,
+                'tti_drift': tti_drift,
+            })
+            return True
+
+        if ect_drift > COMMANDER_ECT_RECONSIDER_THRESHOLD:
+            self.reconsideration_log.append({
+                'step': len(self.risk_history),
+                'reason': 'ect_drift',
+                'tti': self.tti,
+                'ect': self.ect,
+                'ect_drift': ect_drift,
+            })
+            return True
+
+        return False
+
     def decide(self) -> None:
         """
         Make strategic decisions based on ECT vs TTI comparison.
-        Re-evaluate commitments periodically.
+        Re-evaluate commitments periodically and when thresholds drift.
         """
-        # Check if re-evaluation is needed
+        # Check if re-evaluation is needed (throttled by interval AND commitment drift)
         current_step = len(self.risk_history)
-        if current_step - self.last_evaluation_step >= COMMANDER_REEVALUATION_INTERVAL:
+        interval_due = (current_step - self.last_evaluation_step >= COMMANDER_REEVALUATION_INTERVAL)
+        if interval_due and self._should_reconsider_commitment():
             self._reevaluate_strategy()
             self.last_evaluation_step = current_step
 
@@ -271,8 +323,7 @@ class CommanderAgent(Agent):
     def _reevaluate_strategy(self) -> None:
         """
         Re-evaluate current strategy based on ECT vs TTI.
-        This implements "Commitment with Evaluation".
-        Enhanced with ML predictions from real historical fire data.
+        Implements "Commitment with Evaluation" using simulation-derived ML features.
         """
         # Update congestion factor based on active missions
         self.congestion_factor = COMMANDER_CONGESTION_FACTOR_BASE + (len(self.active_missions) * 0.1)
@@ -280,33 +331,40 @@ class CommanderAgent(Agent):
         # Use ML predictions if available
         if ML_AVAILABLE and self.risk_predictor and hasattr(self, 'environment') and self.environment:
             try:
-                # Count evacuated civilians
-                agents = getattr(self.environment, 'agents', None)
-                if agents and 'civilians' in agents:
-                    total_civilians = len(agents['civilians'])
-                    evacuated = sum(1 for c in agents['civilians'] if not c.is_active)
-                else:
-                    total_civilians = 20
-                    evacuated = 0
+                env = self.environment
+                agents = getattr(env, 'agents', {}) or {}
 
-                # Get ML predictions based on current state
-                self.ml_predictions = self.risk_predictor.predict_casualty_risk(
-                    fire_grid=self.environment.fire_grid,
-                    population_density=getattr(self.environment, 'population_density', np.zeros_like(self.environment.fire_grid)),
-                    wind_speed=self.environment.wind_speed,
-                    temperature=getattr(self.environment, 'temperature', 25.0),
-                    humidity=getattr(self.environment, 'humidity', 30.0),
-                    evacuation_status={'evacuated': evacuated, 'total': total_civilians}
-                )
+                # Get wind direction from fire sim if available
+                wind_dir = [1.0, 0.0]
+                wind_speed = getattr(env, 'wind_speed', WIND_SPEED)
+                if self.fire_sim_ref is not None:
+                    wind_dir = list(self.fire_sim_ref.wind_direction)
+                    wind_speed = self.fire_sim_ref.wind_speed
+
+                simulation_state = {
+                    'fire_grid': env.fire_grid,
+                    'fuel_type_grid': getattr(env, 'fuel_type_grid', None),
+                    'elevation_grid': env.elevation_grid,
+                    'wind_speed': wind_speed,
+                    'wind_direction': wind_dir,
+                    'humidity': getattr(env, 'humidity', 30.0),
+                    'tti_minutes': self.tti,
+                    'ect_minutes': self.ect,
+                    'current_phase': self.current_phase,
+                    'step': env.step_count,
+                    'max_steps': MAX_STEPS,
+                    'agents': agents,
+                }
+
+                self.ml_predictions = self.risk_predictor.predict_casualty_risk(simulation_state)
 
                 # Log ML predictions periodically (every 20 steps)
                 if len(self.risk_history) % 20 == 0 and self.ml_predictions:
-                    print(f"  🤖 ML Predictions: Risk={self.ml_predictions.get('risk_level', 'N/A')}, "
+                    print(f"  ML Predictions: Risk={self.ml_predictions.get('risk_level', 'N/A')}, "
                           f"Casualties={self.ml_predictions.get('predicted_casualties', 0):.1f}, "
                           f"Evacuations={self.ml_predictions.get('predicted_evacuations', 0):.0f}")
 
-            except Exception as e:
-                # Silently handle ML prediction errors - fallback to physics-based predictions
+            except Exception:
                 pass
 
     def _select_best_proposal(self, cfp_id: str, proposals: List[Message]) -> None:
@@ -391,11 +449,25 @@ class CommanderAgent(Agent):
         # Determine current phase
         new_phase = self._determine_phase(self.tti, self.ect)
 
-        # Log phase transitions
-        if new_phase != self.current_phase and LOG_PHASE_TRANSITIONS:
-            phase_names = ["Monitoring", "Pre-Alert", "Mass Evacuation", "Shelter-in-Place"]
-            print(f"  📊 Phase Transition: {phase_names[self.current_phase]} → {phase_names[new_phase]}")
-            print(f"     TTI={self.tti:.1f}m, ECT={self.ect:.1f}min")
+        # Log phase transitions and record commitment
+        if new_phase != self.current_phase:
+            if LOG_PHASE_TRANSITIONS:
+                phase_names = ["Monitoring", "Pre-Alert", "Mass Evacuation", "Shelter-in-Place"]
+                print(f"  Phase Transition: {phase_names[self.current_phase]} → {phase_names[new_phase]}")
+                print(f"     TTI={self.tti:.1f}min, ECT={self.ect:.1f}min")
+
+            # Record commitment state at phase change
+            self.committed_at_tti = self.tti
+            self.committed_at_ect = self.ect
+            self.committed_phase = new_phase
+            self.commitment_step = environment.step_count
+            self.reconsideration_log.append({
+                'step': environment.step_count,
+                'reason': 'phase_change',
+                'tti': self.tti,
+                'ect': self.ect,
+                'new_phase': new_phase,
+            })
 
         self.current_phase = new_phase
 
@@ -452,7 +524,6 @@ class CommanderAgent(Agent):
             }
         )
         self.send_message(message)
-        self.evacuation_ordered = True
 
     def _order_shelter_in_place(self) -> None:
         """

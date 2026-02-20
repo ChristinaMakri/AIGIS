@@ -20,6 +20,14 @@ from ..config import (
     WIND_DIRECTION
 )
 
+# Step-ahead fire predictor (optional — gracefully degrades if unavailable)
+try:
+    from ..fire_predictor import StepAheadPredictor as _StepAheadPredictor
+    _FIRE_PREDICTOR_AVAILABLE = True
+except ImportError:
+    _FIRE_PREDICTOR_AVAILABLE = False
+    _StepAheadPredictor = None
+
 
 class AnalystAgent(Agent):
     """
@@ -62,6 +70,14 @@ class AnalystAgent(Agent):
         # ===== KEY METRICS =====
         self.tti_value = float('inf')  # Time To Impact (how long until fire reaches civilians)
         self.ros_value = 0.0  # Rate of Spread (m/s, from Rothermel model)
+
+        # ===== STEP-AHEAD FIRE PREDICTOR =====
+        self.step_ahead_predictor = None
+        if _FIRE_PREDICTOR_AVAILABLE:
+            try:
+                self.step_ahead_predictor = _StepAheadPredictor()
+            except Exception:
+                self.step_ahead_predictor = None
 
         # ===== FUZZY LOGIC SYSTEM =====
         # Initialize fuzzy inference system for risk assessment
@@ -217,14 +233,78 @@ class AnalystAgent(Agent):
             self.fire_reports.clear()
             return
 
-        # Calculate slope (simplified - use random for now, should use elevation grid)
-        slope_percentage = np.random.uniform(0, 30)
+        # Calculate slope from elevation grid using 3×3 neighbourhood around fire
+        fire_lat, fire_lon = closest_fire['lat'], closest_fire['lon']
+        fire_row, fire_col = environment.latlon_to_grid(fire_lat, fire_lon)
+        r0 = max(0, fire_row - 1)
+        r1 = min(environment.elevation_grid.shape[0] - 1, fire_row + 1)
+        c0 = max(0, fire_col - 1)
+        c1 = min(environment.elevation_grid.shape[1] - 1, fire_col + 1)
+        patch = environment.elevation_grid[r0:r1+1, c0:c1+1]
+        if patch.shape[0] >= 2 and patch.shape[1] >= 2:
+            slope_percentage = float(
+                np.max(np.abs(np.diff(patch, axis=0))) +
+                np.max(np.abs(np.diff(patch, axis=1)))
+            ) * 100.0
+        else:
+            slope_percentage = 0.0
 
         # Calculate ROS using Rothermel model
         self.ros_value = self._calculate_ros(slope_percentage, WIND_SPEED)
 
-        # Calculate TTI (Time To Impact)
+        # Calculate TTI (Time To Impact) using Rothermel as baseline
         self.tti_value = self._calculate_tti(min_distance, self.ros_value)
+
+        # Override TTI with step-ahead predictor if trained
+        if (self.step_ahead_predictor is not None and
+                self.step_ahead_predictor.is_trained and
+                hasattr(environment, 'fire_grid') and
+                hasattr(environment, 'elevation_grid') and
+                hasattr(environment, 'fuel_type_grid')):
+            try:
+                # Compute slope grid
+                grad_y, grad_x = np.gradient(environment.elevation_grid)
+                slope_grid = np.sqrt(grad_y**2 + grad_x**2).astype(np.float32)
+
+                # Use current wind direction from environment if available
+                wind_vec = np.array(WIND_DIRECTION, dtype=np.float32)
+
+                prob_grid = self.step_ahead_predictor.predict(
+                    fire_grid=environment.fire_grid,
+                    wind_vec=wind_vec,
+                    slope_grid=slope_grid,
+                    fuel_grid=environment.fuel_type_grid,
+                    humidity=getattr(environment, 'humidity', 30.0),
+                )
+
+                # Find analyst grid position (proxy for civilian settlement)
+                analyst_row, analyst_col = environment.latlon_to_grid(
+                    self.position[0], self.position[1]
+                )
+
+                # Find cells with high fire probability (>0.5) that are currently fuel
+                high_risk = (prob_grid > 0.5) & (environment.fire_grid == 3)
+                if np.any(high_risk):
+                    risk_positions = np.argwhere(high_risk)
+                    distances = np.sqrt(
+                        (risk_positions[:, 0] - analyst_row)**2 +
+                        (risk_positions[:, 1] - analyst_col)**2
+                    )
+                    min_risk_dist_cells = float(distances.min())
+
+                    # Convert cells to metres using environment radius
+                    radius = getattr(environment, 'radius', 2000.0)
+                    grid_size = max(environment.grid_shape)
+                    metres_per_cell = (2.0 * radius) / grid_size
+                    min_risk_dist_m = min_risk_dist_cells * metres_per_cell
+
+                    # Recompute TTI from distance to high-risk cell
+                    tti_predictor = self._calculate_tti(min_risk_dist_m, self.ros_value)
+                    # Use the more conservative (smaller) TTI
+                    if tti_predictor < self.tti_value:
+                        self.tti_value = tti_predictor
+            except Exception:
+                pass  # Fallback to Rothermel TTI
 
         # Get number of exit routes from environment
         num_exits = getattr(environment, 'num_exits', 3)  # Fallback to 3 if not available
@@ -277,7 +357,7 @@ class AnalystAgent(Agent):
                     'type': 'RISK_REPORT',
                     'max_risk': max_risk,
                     'avg_risk': avg_risk,
-                    'tti': self.tti_value,
+                    'tti': self.tti_value / 60.0,
                     'ros': self.ros_value,
                     'num_exits': num_exits,
                     'fire_locations': list(self.risk_assessments.keys()),

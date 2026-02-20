@@ -2,10 +2,12 @@
 Location-Agnostic Environment Builder with Real SRTM Elevation or Perlin Noise Terrain
 Dynamically identifies safe zones using OSM tags and map perimeter
 """
+import io
 import numpy as np
 import osmnx as ox
 import networkx as nx
-from typing import Tuple, Dict, List, Set
+from typing import Tuple, Dict, List, Optional, Set
+from pathlib import Path
 from shapely.geometry import Point
 import warnings
 warnings.filterwarnings('ignore')
@@ -31,7 +33,12 @@ from .config import (
     PERLIN_BASE_HEIGHT,
     PERLIN_AMPLITUDE,
     SAFE_ZONE_TAGS,
-    USE_PERIMETER_AS_SAFE
+    USE_PERIMETER_AS_SAFE,
+    USE_CORINE,
+    CORINE_CLC_URL,
+    CORINE_CACHE_FILE,
+    CLC_TO_NFFL_MAP,
+    DEFAULT_FUEL_MODEL
 )
 
 
@@ -42,7 +49,9 @@ class Environment:
                  obstacle_grid: np.ndarray, elevation_grid: np.ndarray,
                  bounds: Tuple[float, float, float, float],
                  grid_shape: Tuple[int, int],
-                 safe_nodes: Set[int]):
+                 safe_nodes: Set[int],
+                 fuel_type_grid: Optional[np.ndarray] = None,
+                 radius: float = 2000.0):
         self.graph = graph
         self.fuel_grid = fuel_grid
         self.obstacle_grid = obstacle_grid
@@ -50,16 +59,18 @@ class Environment:
         self.bounds = bounds  # (min_lon, min_lat, max_lon, max_lat)
         self.grid_shape = grid_shape
         self.safe_nodes = safe_nodes  # Set of node IDs that are safe zones
+        self.radius = radius  # Map radius in meters (used for cell→metres conversion)
 
         # Population density grid (loaded from real OSM data)
         self.population_density = np.zeros(grid_shape)
 
         # Fuel type grid (NFFL fuel models 1-10)
-        # Default: fuel model 5 (Low Brush)
-        from .config import DEFAULT_FUEL_MODEL
-        self.fuel_type_grid = np.full(grid_shape, DEFAULT_FUEL_MODEL, dtype=np.int8)
-        # Set no-fuel areas to 0
-        self.fuel_type_grid[fuel_grid == 0] = 0
+        if fuel_type_grid is not None:
+            self.fuel_type_grid = fuel_type_grid
+        else:
+            self.fuel_type_grid = np.full(grid_shape, DEFAULT_FUEL_MODEL, dtype=np.int8)
+            # Set no-fuel areas to 0
+            self.fuel_type_grid[fuel_grid == 0] = 0
 
         # Fire state grids
         self.fire_grid = np.zeros_like(fuel_grid, dtype=np.int8)
@@ -230,6 +241,18 @@ class LiveMapBuilder:
         print("  🛡️  Identifying safe zones...")
         safe_nodes = self._identify_safe_zones(graph, bounds)
 
+        # Step 7: Fetch Corine Land Cover fuel types (or derive from forest raster)
+        if USE_CORINE:
+            corine = self._fetch_corine_fuel(bounds)
+        else:
+            corine = None
+
+        if corine is not None:
+            fuel_type_grid = corine
+        else:
+            fuel_type_grid = np.where(fuel_grid > 0, 8, DEFAULT_FUEL_MODEL).astype(np.int8)
+        fuel_type_grid[obstacle_grid > 0] = 0
+
         print(f"✅ Environment built! {len(safe_nodes)} safe zones identified.")
 
         return Environment(
@@ -239,8 +262,87 @@ class LiveMapBuilder:
             elevation_grid=elevation_grid,
             bounds=bounds,
             grid_shape=self.grid_size,
-            safe_nodes=safe_nodes
+            safe_nodes=safe_nodes,
+            fuel_type_grid=fuel_type_grid,
+            radius=self.radius
         )
+
+    def _fetch_corine_fuel(self, bounds: Tuple[float, float, float, float]) -> Optional[np.ndarray]:
+        """
+        Fetch Corine Land Cover (CLC 2018) data and convert to NFFL fuel type grid.
+
+        1. Check cache first
+        2. GET Copernicus WCS URL
+        3. Parse GeoTIFF with rasterio
+        4. Resize to grid_size if needed
+        5. Vectorised CLC→NFFL mapping
+        6. Cache result
+
+        Returns fuel_type_grid (int8) or None on failure.
+        """
+        try:
+            import requests
+        except ImportError:
+            print("  [Corine] requests not available – skipping CLC fetch")
+            return None
+
+        # Check cache
+        lat, lon = self.center
+        cache_path = Path(
+            CORINE_CACHE_FILE.format(lat=f"{lat:.4f}", lon=f"{lon:.4f}", radius=int(self.radius))
+        )
+        if cache_path.exists():
+            try:
+                cached = np.load(cache_path)
+                print(f"  [Corine] Loaded from cache: {cache_path}")
+                return cached['fuel_type_grid'].astype(np.int8)
+            except Exception:
+                pass  # Corrupt cache – re-fetch
+
+        # Build WCS URL
+        minx, miny, maxx, maxy = bounds
+        url = CORINE_CLC_URL.format(
+            minx=minx, miny=miny, maxx=maxx, maxy=maxy,
+            width=self.grid_size[1], height=self.grid_size[0]
+        )
+
+        try:
+            print("  [Corine] Fetching CLC 2018 data from Copernicus...")
+            response = requests.get(url, timeout=30)
+            response.raise_for_status()
+        except Exception as e:
+            print(f"  [Corine] WARNING: Could not fetch CLC data: {e}")
+            return None
+
+        # Parse GeoTIFF
+        try:
+            import rasterio
+            from scipy.ndimage import zoom as ndimage_zoom
+
+            with rasterio.open(io.BytesIO(response.content)) as src:
+                clc_data = src.read(1).astype(np.int16)
+
+            # Resize to match grid_size if needed
+            if clc_data.shape != tuple(self.grid_size):
+                scale_y = self.grid_size[0] / clc_data.shape[0]
+                scale_x = self.grid_size[1] / clc_data.shape[1]
+                clc_data = ndimage_zoom(clc_data, (scale_y, scale_x), order=0).astype(np.int16)
+
+            # Vectorised CLC → NFFL mapping
+            fuel_type_grid = np.full(self.grid_size, DEFAULT_FUEL_MODEL, dtype=np.int8)
+            for clc_code, nffl in CLC_TO_NFFL_MAP.items():
+                fuel_type_grid[clc_data == clc_code] = nffl
+
+            # Cache result
+            cache_path.parent.mkdir(parents=True, exist_ok=True)
+            np.savez_compressed(cache_path, fuel_type_grid=fuel_type_grid)
+            print(f"  [Corine] CLC data loaded and cached to {cache_path}")
+
+            return fuel_type_grid
+
+        except Exception as e:
+            print(f"  [Corine] WARNING: Could not parse CLC GeoTIFF: {e}")
+            return None
 
     def _fetch_road_network(self) -> nx.MultiDiGraph:
         """Fetch road network from OSM"""

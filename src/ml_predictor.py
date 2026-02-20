@@ -7,7 +7,8 @@ Integrates trained ML models to predict:
 - Containment time
 - Financial cost
 
-Used by Commander agent for enhanced decision-making with real historical data.
+Uses 14 simulation-derived features (no hardcoded lat/lon/month).
+Used by Commander agent for enhanced decision-making.
 """
 import numpy as np
 import pickle
@@ -46,158 +47,160 @@ class RiskPredictor:
                         self.models[model_name] = pickle.load(f)
                     loaded_count += 1
                 except Exception as e:
-                    print(f"⚠️  Failed to load {model_name}: {e}")
+                    print(f"  Warning: Failed to load {model_name}: {e}")
 
         if loaded_count > 0:
             self.is_trained = True
-            print(f"🤖 ML Predictor initialized with {loaded_count}/4 models")
+            print(f"  ML Predictor initialized with {loaded_count}/4 models")
         else:
-            print("⚠️  No ML models found. Run 'python train_models.py' first.")
-            print("   Simulation will use physics-based predictions only.")
+            print("  No ML models found. Run 'python train_models.py' first.")
 
-    def predict_casualty_risk(
-        self,
-        fire_grid: np.ndarray,
-        population_density: np.ndarray,
-        wind_speed: float,
-        temperature: float = 25.0,
-        humidity: float = 30.0,
-        evacuation_status: Optional[Dict] = None
-    ) -> Dict[str, Any]:
+    def predict_casualty_risk(self, simulation_state: Dict[str, Any]) -> Dict[str, Any]:
         """
-        Predict casualty risk and other metrics for current scenario.
+        Predict casualty risk and other metrics for current simulation state.
 
         Args:
-            fire_grid: Fire intensity grid (2D array)
-            population_density: Population density grid (2D array)
-            wind_speed: Current wind speed (m/s)
-            temperature: Temperature (°C)
-            humidity: Relative humidity (%)
-            evacuation_status: Dict with 'evacuated' and 'total' counts
+            simulation_state: dict with keys:
+                fire_grid, fuel_type_grid, elevation_grid,
+                wind_speed, wind_direction, humidity,
+                tti_minutes, ect_minutes, current_phase,
+                step, max_steps, agents
 
         Returns:
             Dictionary with predictions:
-            - predicted_casualties: Expected number of casualties
-            - predicted_evacuations: Required evacuation count
-            - predicted_containment_days: Days to contain fire
-            - predicted_cost: Estimated financial cost ($)
-            - risk_level: 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
+            - predicted_casualties, predicted_evacuations,
+              predicted_containment_days, predicted_cost, risk_level
         """
         if not self.is_trained:
             return self._get_default_predictions()
 
         try:
-            # Extract features from current simulation state
-            features = self._extract_features(
-                fire_grid, population_density, wind_speed,
-                temperature, humidity, evacuation_status
-            )
+            features = self._extract_features(simulation_state)
 
             predictions = {}
 
-            # Casualty prediction
-            if 'casualty_risk' in self.models:
-                model_data = self.models['casualty_risk']
-                X_scaled = model_data['scaler'].transform([features])
-                casualties = model_data['model'].predict(X_scaled)[0]
-                predictions['predicted_casualties'] = max(0, float(casualties))
-            else:
-                predictions['predicted_casualties'] = 0.0
+            for model_key, out_key in [
+                ('casualty_risk', 'predicted_casualties'),
+                ('evacuation_count', 'predicted_evacuations'),
+                ('containment_time', 'predicted_containment_days'),
+                ('financial_cost', 'predicted_cost'),
+            ]:
+                if model_key in self.models:
+                    model_data = self.models[model_key]
+                    X_scaled = model_data['scaler'].transform([features])
+                    value = model_data['model'].predict(X_scaled)[0]
+                    predictions[out_key] = max(0, float(value))
+                else:
+                    predictions[out_key] = 0.0
 
-            # Evacuation prediction
-            if 'evacuation_count' in self.models:
-                model_data = self.models['evacuation_count']
-                X_scaled = model_data['scaler'].transform([features])
-                evacuations = model_data['model'].predict(X_scaled)[0]
-                predictions['predicted_evacuations'] = max(0, float(evacuations))
-            else:
-                predictions['predicted_evacuations'] = 0.0
-
-            # Containment time prediction
-            if 'containment_time' in self.models:
-                model_data = self.models['containment_time']
-                X_scaled = model_data['scaler'].transform([features])
-                containment = model_data['model'].predict(X_scaled)[0]
-                predictions['predicted_containment_days'] = max(0, float(containment))
-            else:
-                predictions['predicted_containment_days'] = 0.0
-
-            # Financial cost prediction
-            if 'financial_cost' in self.models:
-                model_data = self.models['financial_cost']
-                X_scaled = model_data['scaler'].transform([features])
-                cost = model_data['model'].predict(X_scaled)[0]
-                predictions['predicted_cost'] = max(0, float(cost))
-            else:
-                predictions['predicted_cost'] = 0.0
-
-            # Determine overall risk level
             predictions['risk_level'] = self._calculate_risk_level(predictions)
-
             return predictions
 
         except Exception as e:
-            print(f"⚠️  Prediction error: {e}")
             return self._get_default_predictions()
 
-    def _extract_features(
-        self,
-        fire_grid: np.ndarray,
-        population_density: np.ndarray,
-        wind_speed: float,
-        temperature: float,
-        humidity: float,
-        evacuation_status: Optional[Dict]
-    ) -> list:
+    def _extract_features(self, simulation_state: Dict[str, Any]) -> list:
         """
-        Extract ML features from simulation state.
+        Extract 14 simulation-derived ML features.
 
-        Features must match training data format:
-        - fire_size_acres
-        - latitude (placeholder: grid center)
-        - longitude (placeholder: grid center)
-        - month (placeholder: assume summer)
-        - day_of_year (placeholder: assume peak season)
+        Feature order must match ML_FEATURE_NAMES in config.py:
+        burning_cells_pct, burnt_cells_pct, wind_speed, wind_dir_x, wind_dir_y,
+        mean_slope, dominant_fuel_type, active_rescuers, civilians_remaining,
+        current_phase, tti_normalized, ect_normalized, step_normalized, humidity
         """
-        # Calculate fire size from grid
-        fire_cells = np.sum(fire_grid > 0)
-        # Convert grid cells to acres (assume each cell ~ 50m x 50m = 0.62 acres)
-        fire_size_acres = fire_cells * 0.62
+        fire_grid = simulation_state.get('fire_grid')
+        fuel_type_grid = simulation_state.get('fuel_type_grid')
+        elevation_grid = simulation_state.get('elevation_grid')
+        wind_speed = float(simulation_state.get('wind_speed', 5.0))
+        wind_direction = simulation_state.get('wind_direction', [1.0, 0.0])
+        humidity = float(simulation_state.get('humidity', 30.0))
+        tti_minutes = float(simulation_state.get('tti_minutes', float('inf')))
+        ect_minutes = float(simulation_state.get('ect_minutes', 0.0))
+        current_phase = int(simulation_state.get('current_phase', 0))
+        step = int(simulation_state.get('step', 0))
+        max_steps = int(simulation_state.get('max_steps', 500))
+        agents = simulation_state.get('agents', {})
 
-        # Use placeholder location features (these would ideally come from simulation config)
-        # For now, use mid-latitude values common in fire-prone regions
-        latitude = 38.0
-        longitude = -120.0
+        total_cells = fire_grid.size if fire_grid is not None else 1
 
-        # Temporal features (assume peak fire season)
-        month = 7  # July
-        day_of_year = 200  # Mid-summer
+        # 1. burning_cells_pct
+        burning_cells_pct = float(np.sum(fire_grid == 1)) / total_cells if fire_grid is not None else 0.0
 
-        # Return features in the same order as training
+        # 2. burnt_cells_pct
+        burnt_cells_pct = float(np.sum(fire_grid == 2)) / total_cells if fire_grid is not None else 0.0
+
+        # 3-4-5. wind_speed, wind_dir_x, wind_dir_y
+        wind_dir = wind_direction if wind_direction is not None else [1.0, 0.0]
+        wind_dir_x = float(wind_dir[0])
+        wind_dir_y = float(wind_dir[1])
+
+        # 6. mean_slope in burning area
+        if elevation_grid is not None and fire_grid is not None:
+            burning_mask = (fire_grid == 1)
+            if np.any(burning_mask):
+                # Compute gradient magnitude at burning cells
+                grad_y, grad_x = np.gradient(elevation_grid)
+                slope_mag = np.sqrt(grad_y**2 + grad_x**2)
+                mean_slope = float(np.mean(slope_mag[burning_mask]))
+            else:
+                mean_slope = 0.0
+        else:
+            mean_slope = 0.0
+
+        # 7. dominant_fuel_type in burning area
+        if fuel_type_grid is not None and fire_grid is not None:
+            burning_mask = (fire_grid == 1)
+            if np.any(burning_mask):
+                fuels = fuel_type_grid[burning_mask]
+                values, counts = np.unique(fuels, return_counts=True)
+                dominant_fuel_type = float(values[np.argmax(counts)])
+            else:
+                from .config import DEFAULT_FUEL_MODEL
+                dominant_fuel_type = float(DEFAULT_FUEL_MODEL)
+        else:
+            dominant_fuel_type = 5.0
+
+        # 8. active_rescuers
+        rescuers = agents.get('rescuers', [])
+        active_rescuers = float(len([r for r in rescuers if getattr(r, 'is_active', True)]))
+
+        # 9. civilians_remaining
+        civilians = agents.get('civilians', [])
+        civilians_remaining = float(sum(1 for c in civilians if getattr(c, 'is_active', True)))
+
+        # 10. current_phase
+        phase = float(current_phase)
+
+        # 11. tti_normalized (clip tti/60 to [0,1])
+        if tti_minutes == float('inf') or tti_minutes != tti_minutes:
+            tti_normalized = 0.0
+        else:
+            tti_normalized = float(np.clip(tti_minutes / 60.0, 0.0, 1.0))
+
+        # 12. ect_normalized (clip ect/30 to [0,1])
+        ect_normalized = float(np.clip(ect_minutes / 30.0, 0.0, 1.0))
+
+        # 13. step_normalized
+        step_normalized = float(step) / float(max_steps) if max_steps > 0 else 0.0
+
+        # 14. humidity
+        humidity_feat = float(humidity)
+
         return [
-            fire_size_acres,
-            latitude,
-            longitude,
-            month,
-            day_of_year
+            burning_cells_pct, burnt_cells_pct,
+            wind_speed, wind_dir_x, wind_dir_y,
+            mean_slope, dominant_fuel_type,
+            active_rescuers, civilians_remaining,
+            phase,
+            tti_normalized, ect_normalized, step_normalized,
+            humidity_feat,
         ]
 
     def _calculate_risk_level(self, predictions: Dict) -> str:
-        """
-        Determine overall risk level from predictions.
-
-        Combines casualty and evacuation predictions into categorical risk level.
-
-        Args:
-            predictions: Dictionary with prediction values
-
-        Returns:
-            Risk level: 'LOW', 'MEDIUM', 'HIGH', 'CRITICAL'
-        """
+        """Determine overall risk level from predictions."""
         casualties = predictions.get('predicted_casualties', 0)
         evacuations = predictions.get('predicted_evacuations', 0)
 
-        # Risk thresholds based on impact severity
         if casualties > 10 or evacuations > 1000:
             return 'CRITICAL'
         elif casualties > 5 or evacuations > 500:

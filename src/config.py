@@ -169,6 +169,49 @@ FUEL_MODELS = {
 # Default fuel model (used if not specified)
 DEFAULT_FUEL_MODEL = 5  # Low Brush (moderate characteristics)
 
+# =============================================================================
+# CORINE LAND COVER (CLC) INTEGRATION
+# =============================================================================
+
+USE_CORINE = True
+CORINE_CLC_URL = (
+    "https://image.discomap.eea.europa.eu/arcgis/services/Corine/CLC2018_WM/MapServer/"
+    "WCSServer?SERVICE=WCS&VERSION=1.0.0&REQUEST=GetCoverage&COVERAGE=1"
+    "&CRS=EPSG:4326&BBOX={minx},{miny},{maxx},{maxy}"
+    "&WIDTH={width}&HEIGHT={height}&FORMAT=GeoTIFF"
+)
+CORINE_CACHE_FILE = "cache/corine_clc_{lat}_{lon}_{radius}.npz"
+
+# Mapping from CLC class codes to NFFL fuel model numbers
+CLC_TO_NFFL_MAP = {
+    311: 8, 312: 9, 313: 8,   # forests → closed/hardwood/closed timber
+    323: 4, 322: 6, 324: 7,   # Mediterranean scrub/heath/transitional
+    321: 1, 231: 3,           # grassland/pasture
+    111: 0, 112: 0,           # urban (non-fuel)
+    331: 0, 332: 0, 511: 0,   # bare/water
+}
+
+# =============================================================================
+# ML PREDICTOR FEATURE NAMES (14-feature simulation-derived vector)
+# =============================================================================
+
+ML_FEATURE_NAMES = [
+    'burning_cells_pct',      # % of grid currently burning
+    'burnt_cells_pct',        # % of grid already burnt
+    'wind_speed',             # current wind speed (m/s)
+    'wind_dir_x',             # wind direction x-component
+    'wind_dir_y',             # wind direction y-component
+    'mean_slope',             # mean terrain slope in burning area
+    'dominant_fuel_type',     # mode fuel type in burning area
+    'active_rescuers',        # number of active rescuer agents
+    'civilians_remaining',    # number of civilians still active
+    'current_phase',          # commander phase (0-3)
+    'tti_normalized',         # TTI clipped to [0,1] (tti/60)
+    'ect_normalized',         # ECT clipped to [0,1] (ect/30)
+    'step_normalized',        # current step / MAX_STEPS
+    'humidity',               # relative humidity (%)
+]
+
 # Logging Intervals
 WIND_LOG_INTERVAL = 10  # Steps between wind direction change logs
 
@@ -177,8 +220,6 @@ WIND_LOG_INTERVAL = 10  # Steps between wind direction change logs
 # =============================================================================
 
 NUM_SENTINELS = 4
-NUM_ANALYSTS = 1  # Typically one central analyst
-NUM_COMMANDERS = 1
 NUM_RESCUERS = 3
 NUM_FIREFIGHTERS = 2  # Firefighting units for active suppression
 NUM_CIVILIANS = 20
@@ -202,13 +243,6 @@ SENTINEL_DEBOUNCE_STEPS = 3  # Must detect for N consecutive steps (prevents fal
 # Analyst uses fuzzy logic to assess risk based on Time To Impact (TTI) and
 # escape route availability. These thresholds define linguistic variables.
 
-# Fuzzy Input Ranges
-ANALYST_ROS_RANGE = (0, 10)  # Rate of spread (m/s)
-ANALYST_DISTANCE_RANGE = (0, 200)  # Distance to assets (meters)
-
-# Fuzzy Output Range
-ANALYST_RISK_RANGE = (0, 100)
-
 # Time To Impact (TTI) Thresholds (meters)
 ANALYST_TTI_IMMINENT = 30  # Fire is imminent (0-30 meters)
 ANALYST_TTI_NEAR = 70  # Fire approaching (30-70 meters)
@@ -216,9 +250,6 @@ ANALYST_TTI_NEAR = 70  # Fire approaching (30-70 meters)
 
 # Escape Route Thresholds
 ANALYST_EXIT_BOTTLENECK_THRESHOLD = 2  # Number of exits (0-2 = bottlenecked, 2+ = sufficient)
-
-# Re-evaluation trigger
-ANALYST_WIND_CHANGE_THRESHOLD = 5.0  # degrees (re-evaluate if wind shifts > 5°)
 
 # =============================================================================
 # COMMANDER AGENT (ECT vs TTI Decision Protocol)
@@ -244,6 +275,10 @@ COMMANDER_PHASE_MONITOR_MULTIPLIER = 2.5   # TTI > 2.5 × ECT: Monitoring
 COMMANDER_PHASE_PREALERT_MULTIPLIER = 1.5  # TTI > 1.5 × ECT: Pre-Alert
 COMMANDER_PHASE_EVACUATE_MULTIPLIER = 1.0  # TTI > 1.0 × ECT: Mass Evacuation
 # Phase 3 (Shelter): TTI ≤ ECT (too late to evacuate safely)
+
+# Commitment thresholds for re-evaluation (in minutes)
+COMMANDER_TTI_RECONSIDER_THRESHOLD = 0.5   # minutes drift triggers reconsideration
+COMMANDER_ECT_RECONSIDER_THRESHOLD = 0.25  # minutes drift triggers reconsideration
 
 # =============================================================================
 # RESCUER AGENT (Risk-Adjusted Bidding via Contract Net Protocol)
@@ -332,10 +367,7 @@ DPI = 100
 COLOR_FUEL = '#228B22'  # Forest green
 COLOR_BURNING = '#FF4500'  # Orange red
 COLOR_BURNT = '#2F4F4F'  # Dark slate gray
-COLOR_OBSTACLE = '#696969'  # Dim gray
-COLOR_WATER = '#4169E1'  # Royal blue
 COLOR_SAFE_ZONE = '#90EE90'  # Light green
-COLOR_ROAD = '#D3D3D3'  # Light gray
 
 # Agent Colors
 COLOR_SENTINEL = '#FFD700'  # Gold

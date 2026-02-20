@@ -61,7 +61,6 @@ class FirefighterAgent(Agent):
         # === MISSION STATE ===
         self.target_fire = None  # (row, col) of target fire cell
         self.suppression_strategy = None  # 'water', 'fire_line', 'backburn'
-        self.assigned_sector = None  # Sector assigned by incident commander
 
     def perceive(self, environment) -> None:
         """
@@ -87,9 +86,7 @@ class FirefighterAgent(Agent):
 
         # Check messages for coordination
         for message in self.messages_inbox:
-            if message.performative == "INFORM":
-                if message.content.get('type') == 'SECTOR_ASSIGNMENT':
-                    self.assigned_sector = message.content.get('sector')
+            pass  # No relevant message types currently handled
 
     def decide(self) -> None:
         """

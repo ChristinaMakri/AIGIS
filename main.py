@@ -19,8 +19,14 @@ from src.simulation import AIGISSimulation
 from src.dashboard import Dashboard
 from src.config import *
 
+try:
+    from src.analysis import plot_simulation_summary
+    _ANALYSIS_AVAILABLE = True
+except ImportError:
+    _ANALYSIS_AVAILABLE = False
 
-def run_single_simulation(lat: float, lon: float, radius: float, mode: str = 'gui') -> Dict[str, Any]:
+
+def run_single_simulation(lat: float, lon: float, radius: float, mode: str = 'gui'):
     """
     Run a single simulation instance.
 
@@ -28,10 +34,10 @@ def run_single_simulation(lat: float, lon: float, radius: float, mode: str = 'gu
         lat: Center latitude
         lon: Center longitude
         radius: Map radius in meters
-        mode: 'gui' (interactive dashboard) or 'batch' (headless)
+        mode: 'gui' (interactive dashboard) or 'batch'/'headless' (headless)
 
     Returns:
-        Dictionary of final metrics
+        Tuple of (results dict, AIGISSimulation instance)
     """
     sim = AIGISSimulation(lat, lon, radius, mode=mode)
 
@@ -39,10 +45,11 @@ def run_single_simulation(lat: float, lon: float, radius: float, mode: str = 'gu
         # Run with live dashboard
         dashboard = Dashboard(sim)
         dashboard.run()
-        return sim.get_results()
+        return sim.get_results(), sim
     else:
-        # Run headless (batch mode)
-        return sim.run_until_complete()
+        # Run headless
+        results = sim.run_until_complete()
+        return results, sim
 
 
 def run_monte_carlo(lat: float, lon: float, radius: float,
@@ -97,13 +104,16 @@ def run_monte_carlo(lat: float, lon: float, radius: float,
         sim = AIGISSimulation(lat, lon, radius, mode='batch', run_id=run_id)
         result = sim.run_until_complete()
 
-        # Add metadata to results
-        result['run_id'] = run_id
-        result['lat'] = lat
-        result['lon'] = lon
-        result['radius'] = radius
+        # Add metadata to results (exclude complex nested objects for CSV)
+        result_flat = {k: v for k, v in result.items()
+                       if k not in ('history', 'reconsideration_log')}
+        result_flat['run_id'] = run_id
+        result_flat['lat'] = lat
+        result_flat['lon'] = lon
+        result_flat['radius'] = radius
 
-        results_list.append(result)
+        results_list.append(result_flat)
+        result = result_flat  # for the print below
 
         # Print summary for this run
         print(f"  ✅ Complete: {result['steps']} steps, "
@@ -239,21 +249,22 @@ Examples:
 
         else:
             # Single simulation mode
-            print(f"📍 Location: ({args.lat:.4f}, {args.lon:.4f})")
-            print(f"📏 Radius: {args.radius}m")
-            print(f"🎨 Mode: {args.mode}")
+            sim_mode = args.mode if args.mode != 'headless' else 'batch'
+            print(f"Location: ({args.lat:.4f}, {args.lon:.4f})")
+            print(f"Radius: {args.radius}m")
+            print(f"Mode: {args.mode}")
             print()
 
-            result = run_single_simulation(
+            result, sim = run_single_simulation(
                 lat=args.lat,
                 lon=args.lon,
                 radius=args.radius,
-                mode=args.mode
+                mode=sim_mode
             )
 
             # Print single-run results
             print("\n" + "=" * 70)
-            print("📊 SIMULATION RESULTS")
+            print("SIMULATION RESULTS")
             print("=" * 70)
             print(f"  Total Steps:              {result['steps']}")
             print(f"  Total Civilians:          {result['total_civilians']}")
@@ -266,7 +277,27 @@ Examples:
             print(f"  Rescuer Refusals:         {result['rescuer_refusals']}")
             print(f"  Max Active Fire Cells:    {result['max_fire_cells']}")
             print(f"  Final Commander Phase:    {result['final_phase']}")
+            recon = result.get('reconsideration_log', [])
+            print(f"  Reconsideration Events:   {len(recon)}")
             print("=" * 70)
+
+            # Generate summary plot for headless/batch single runs
+            if sim_mode != 'gui' and _ANALYSIS_AVAILABLE:
+                try:
+                    import matplotlib
+                    matplotlib.use('Agg')  # non-interactive backend for headless
+                    import matplotlib.pyplot as plt
+
+                    history = result.get('history', {})
+                    fig = plot_simulation_summary(
+                        result, history,
+                        env=sim.environment,
+                        output_path="output/summary.png"
+                    )
+                    plt.close(fig)
+                    print("  Summary figure saved to output/summary.png")
+                except Exception as e:
+                    print(f"  (Could not generate summary figure: {e})")
 
     except KeyboardInterrupt:
         print("\n\n⚠️  Simulation interrupted by user")
