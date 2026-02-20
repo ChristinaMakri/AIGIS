@@ -66,6 +66,7 @@ class AnalystAgent(Agent):
         # ===== FIRE INTELLIGENCE DATA =====
         self.fire_reports: List[Dict] = []  # Reports from Sentinel agents
         self.risk_assessments: Dict[Tuple[int, int], float] = {}  # Grid position → risk
+        self._environment = None  # Set by perceive(); used in decide()
 
         # ===== KEY METRICS =====
         self.tti_value = float('inf')  # Time To Impact (how long until fire reaches civilians)
@@ -198,6 +199,7 @@ class AnalystAgent(Agent):
 
     def perceive(self, environment) -> None:
         """Collect fire detection reports from Sentinels"""
+        self._environment = environment
         for message in self.messages_inbox:
             if message.performative == "INFORM" and message.content.get('type') == 'FIRE_DETECTION':
                 self.fire_reports.append(message.content)
@@ -207,6 +209,7 @@ class AnalystAgent(Agent):
         Analyze fire reports using Rothermel ROS model and calculate TTI.
         Apply fuzzy logic for final risk assessment.
         """
+        environment = self._environment
         self.risk_assessments.clear()
 
         if not self.fire_reports:
