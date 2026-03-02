@@ -94,6 +94,12 @@ class AIGISSimulation:
         """
         if fire_locations:
             print(f"  🛰️  Igniting {len(fire_locations)} fires from provided coordinates...")
+            # Ensure there are fuel cells first (creates synthetic fuel in urban areas)
+            if not np.any(self.environment.fire_grid == 3):
+                print("  ℹ️  No natural fuel in map — marking non-obstacle cells as combustible")
+                non_obstacle = (self.environment.obstacle_grid == 0)
+                self.environment.fire_grid[non_obstacle] = 3
+                self.environment.fuel_type_grid[non_obstacle] = 1  # NFFL 1 = short grass
             self.fire_sim.ignite_at_locations(fire_locations)
             return
 
@@ -101,8 +107,15 @@ class AIGISSimulation:
         print("  ⛰️  No fire coordinates provided — igniting at highest-elevation fuel zones...")
         fuel_cells = np.argwhere(self.environment.fire_grid == 3)
         if len(fuel_cells) == 0:
-            print("  ⚠️  No fuel cells available to ignite")
-            return
+            # No natural fuel (e.g., fully urban area): treat all non-obstacle cells as fuel
+            print("  ℹ️  No natural fuel in map — marking non-obstacle cells as combustible")
+            non_obstacle = (self.environment.obstacle_grid == 0)
+            self.environment.fire_grid[non_obstacle] = 3
+            self.environment.fuel_type_grid[non_obstacle] = 1  # NFFL 1 = short grass
+            fuel_cells = np.argwhere(self.environment.fire_grid == 3)
+            if len(fuel_cells) == 0:
+                print("  ⚠️  Could not create any fuel cells — skipping ignition")
+                return
 
         elevations = self.environment.elevation_grid[fuel_cells[:, 0], fuel_cells[:, 1]]
         num_ignition = min(3, len(fuel_cells))
@@ -496,8 +509,9 @@ class AIGISSimulation:
         """Check if simulation is finished"""
         fire_stats = self.fire_sim.get_fire_statistics()
 
-        # Complete if fire burned out
-        if fire_stats['burning_cells'] == 0 and fire_stats['fuel_cells'] == 0:
+        # Complete if fire burned out — but only after at least one step has run
+        # (prevents immediate exit when fuel_cells==0 in urban environments)
+        if self.step > 0 and fire_stats['burning_cells'] == 0 and fire_stats['fuel_cells'] == 0:
             return True
 
         # Complete if all civilians are either evacuated or casualties

@@ -388,15 +388,31 @@ class LiveMapBuilder:
     def _fetch_forests(self, bounds: Tuple[float, float, float, float]) -> list:
         """Fetch forest geometries from OSM"""
         try:
+            center_lat = (bounds[1] + bounds[3]) / 2.0
+            center_lon = (bounds[0] + bounds[2]) / 2.0
+            dist = max(
+                abs(bounds[3] - bounds[1]) * 111320 / 2,
+                abs(bounds[2] - bounds[0]) * 111320 / 2,
+            )
             tags = {
                 'landuse': ['forest', 'wood'],
                 'natural': ['wood', 'tree', 'tree_row']
             }
-            gdf = ox.features_from_bbox(
-                bbox=(bounds[3], bounds[1], bounds[2], bounds[0]),
-                tags=tags
+            gdf = ox.features_from_point(
+                (center_lat, center_lon),
+                tags=tags,
+                dist=int(dist)
             )
-            return list(gdf.geometry)
+            geoms = []
+            for geom in gdf.geometry:
+                if geom is not None and not geom.is_empty:
+                    try:
+                        b = geom.bounds
+                        if all(np.isfinite(v) for v in b):
+                            geoms.append(geom)
+                    except Exception:
+                        pass
+            return geoms
         except Exception as e:
             print(f"  ⚠️  Could not fetch forests: {e}")
             return []
@@ -404,15 +420,31 @@ class LiveMapBuilder:
     def _fetch_buildings(self, bounds: Tuple[float, float, float, float]) -> list:
         """Fetch building geometries from OSM"""
         try:
+            center_lat = (bounds[1] + bounds[3]) / 2.0
+            center_lon = (bounds[0] + bounds[2]) / 2.0
+            dist = max(
+                abs(bounds[3] - bounds[1]) * 111320 / 2,
+                abs(bounds[2] - bounds[0]) * 111320 / 2,
+            )
             tags = {
                 'building': True,
                 'landuse': ['residential', 'commercial', 'industrial']
             }
-            gdf = ox.features_from_bbox(
-                bbox=(bounds[3], bounds[1], bounds[2], bounds[0]),
-                tags=tags
+            gdf = ox.features_from_point(
+                (center_lat, center_lon),
+                tags=tags,
+                dist=int(dist)
             )
-            return list(gdf.geometry)
+            geoms = []
+            for geom in gdf.geometry:
+                if geom is not None and not geom.is_empty:
+                    try:
+                        b = geom.bounds
+                        if all(np.isfinite(v) for v in b):
+                            geoms.append(geom)
+                    except Exception:
+                        pass
+            return geoms
         except Exception as e:
             print(f"  ⚠️  Could not fetch buildings: {e}")
             return []
@@ -436,6 +468,10 @@ class LiveMapBuilder:
                     continue
 
                 geom_bounds = geom.bounds
+
+                # Skip geometries with NaN or invalid bounds
+                if any(not np.isfinite(v) for v in geom_bounds):
+                    continue
 
                 # Convert to grid coordinates
                 x_min = int((geom_bounds[0] - min_lon) / (max_lon - min_lon) * self.grid_size[1])

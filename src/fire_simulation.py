@@ -55,12 +55,12 @@ class FireSimulation:
         self.wind_oscillation_period = WIND_OSCILLATION_PERIOD  # Steps for full sine cycle
         self.wind_oscillation_amplitude = WIND_OSCILLATION_AMPLITUDE  # Max deviation in degrees
 
+        # Throttle wind logging to every 10 steps to reduce console spam
+        self.last_wind_log_step = 0
+
         # Wind direction as vector (will be updated each step)
         # Stored as normalized 2D vector for efficient dot product calculations
         self._update_wind_vector()
-
-        # Throttle wind logging to every 10 steps to reduce console spam
-        self.last_wind_log_step = 0
 
     def _update_wind_vector(self):
         """
@@ -174,7 +174,17 @@ class FireSimulation:
                 self.environment.fire_grid[row, col] = 1
                 print(f"  🔥 Fire ignited at ({lat:.4f}, {lon:.4f}) → grid ({row}, {col})")
             else:
-                print(f"  ⚠️  Cannot ignite at ({lat:.4f}, {lon:.4f}) - no fuel or out of bounds")
+                # Search for nearest fuel cell within expanding radius
+                fuel_cells = np.argwhere(self.environment.fire_grid == 3)
+                if len(fuel_cells) > 0:
+                    distances = np.sqrt((fuel_cells[:, 0] - row)**2 + (fuel_cells[:, 1] - col)**2)
+                    nearest_idx = int(distances.argmin())
+                    nr, nc = fuel_cells[nearest_idx]
+                    self.environment.fire_grid[nr, nc] = 1
+                    nlat, nlon = self.environment.grid_to_latlon(nr, nc)
+                    print(f"  🔥 Fire ignited near ({lat:.4f}, {lon:.4f}) → nearest fuel at grid ({nr}, {nc})")
+                else:
+                    print(f"  ⚠️  Cannot ignite at ({lat:.4f}, {lon:.4f}) - no fuel cells in grid")
 
     def step(self) -> None:
         """
@@ -369,7 +379,7 @@ class FireSimulation:
         # Different fuel types burn at different rates (NFFL models)
         # Get fuel type multipliers from environment
         from .config import FUEL_MODELS
-        fuel_type_factor = np.ones_like(base_prob)
+        fuel_type_factor = np.ones(shifted_burning.shape, dtype=np.float32)
 
         # Apply fuel-specific spread multipliers
         for fuel_id, fuel_props in FUEL_MODELS.items():
