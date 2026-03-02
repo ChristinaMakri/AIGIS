@@ -3,7 +3,7 @@ AIGIS - AI for Guardian & Intervention Systems
 Multi-Agent Wildfire Evacuation Simulation
 
 CLI Interface supporting:
-- Single simulation with live dashboard (GUI mode)
+- Single headless simulation
 - Monte Carlo batch experiments (batch mode)
 - Location-agnostic: works anywhere in the world
 - Research-ready: exports CSV results for statistical analysis
@@ -16,44 +16,32 @@ from typing import Dict, List, Any
 import sys
 
 from src.simulation import AIGISSimulation
-from src.dashboard import Dashboard
 from src.config import *
 
-try:
-    from src.analysis import plot_simulation_summary
-    _ANALYSIS_AVAILABLE = True
-except ImportError:
-    _ANALYSIS_AVAILABLE = False
 
-
-def run_single_simulation(lat: float, lon: float, radius: float, mode: str = 'gui'):
+def run_single_simulation(lat: float, lon: float, radius: float,
+                          fire_locations: list = None):
     """
-    Run a single simulation instance.
+    Run a single headless simulation instance.
 
     Args:
         lat: Center latitude
         lon: Center longitude
         radius: Map radius in meters
-        mode: 'gui' (interactive dashboard) or 'batch'/'headless' (headless)
+        fire_locations: List of (lat, lon) tuples for real fire ignition points.
 
     Returns:
         Tuple of (results dict, AIGISSimulation instance)
     """
-    sim = AIGISSimulation(lat, lon, radius, mode=mode)
-
-    if mode == 'gui':
-        # Run with live dashboard
-        dashboard = Dashboard(sim)
-        dashboard.run()
-        return sim.get_results(), sim
-    else:
-        # Run headless
-        results = sim.run_until_complete()
-        return results, sim
+    sim = AIGISSimulation(lat, lon, radius, mode='batch',
+                          fire_locations=fire_locations)
+    results = sim.run_until_complete()
+    return results, sim
 
 
 def run_monte_carlo(lat: float, lon: float, radius: float,
-                   num_runs: int, output_file: str) -> pd.DataFrame:
+                   num_runs: int, output_file: str,
+                   fire_locations: list = None) -> pd.DataFrame:
     """
     Run Monte Carlo experiments (N iterations) and export results to CSV.
 
@@ -101,7 +89,8 @@ def run_monte_carlo(lat: float, lon: float, radius: float,
 
         # Each run uses a different random seed for variability
         # Simulation runs in headless mode (no GUI) for speed
-        sim = AIGISSimulation(lat, lon, radius, mode='batch', run_id=run_id)
+        sim = AIGISSimulation(lat, lon, radius, mode='batch', run_id=run_id,
+                              fire_locations=fire_locations)
         result = sim.run_until_complete()
 
         # Add metadata to results (exclude complex nested objects for CSV)
@@ -194,10 +183,10 @@ def main():
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Examples:
-  # Single simulation with live dashboard (default location)
+  # Single simulation (default location)
   python main.py
 
-  # Custom location with live dashboard
+  # Custom location
   python main.py --lat 40.7128 --lon -74.0060 --radius 2000
 
   # Monte Carlo batch mode (10 runs)
@@ -216,16 +205,28 @@ Examples:
     parser.add_argument('--radius', type=float, default=MAP_RADIUS,
                        help=f'Map radius in meters (default: {MAP_RADIUS})')
 
+    # Fire ignition (real coordinates)
+    parser.add_argument('--fire-lat', type=float, nargs='+', metavar='LAT',
+                       help='Latitude(s) of real fire ignition point(s)')
+    parser.add_argument('--fire-lon', type=float, nargs='+', metavar='LON',
+                       help='Longitude(s) of real fire ignition point(s)')
+
     # Mode selection
     parser.add_argument('--batch', type=int, metavar='N',
                        help='Run N Monte Carlo experiments (batch mode)')
     parser.add_argument('--output', type=str, default='results.csv',
                        help='Output CSV file for batch mode (default: results.csv)')
-    parser.add_argument('--mode', type=str, choices=['gui', 'headless'],
-                       default='gui',
-                       help='Visualization mode (default: gui)')
 
     args = parser.parse_args()
+
+    # Build fire locations list from paired --fire-lat / --fire-lon args
+    fire_locations = None
+    if args.fire_lat and args.fire_lon:
+        if len(args.fire_lat) != len(args.fire_lon):
+            print("❌ --fire-lat and --fire-lon must have the same number of values")
+            sys.exit(1)
+        fire_locations = list(zip(args.fire_lat, args.fire_lon))
+        print(f"  🔥 Using {len(fire_locations)} real fire location(s) from CLI")
 
     # Print header
     print("\n" + "=" * 70)
@@ -241,7 +242,8 @@ Examples:
                 lon=args.lon,
                 radius=args.radius,
                 num_runs=args.batch,
-                output_file=args.output
+                output_file=args.output,
+                fire_locations=fire_locations
             )
 
             # Print statistics
@@ -249,17 +251,15 @@ Examples:
 
         else:
             # Single simulation mode
-            sim_mode = args.mode if args.mode != 'headless' else 'batch'
             print(f"Location: ({args.lat:.4f}, {args.lon:.4f})")
             print(f"Radius: {args.radius}m")
-            print(f"Mode: {args.mode}")
             print()
 
             result, sim = run_single_simulation(
                 lat=args.lat,
                 lon=args.lon,
                 radius=args.radius,
-                mode=sim_mode
+                fire_locations=fire_locations
             )
 
             # Print single-run results
@@ -280,24 +280,6 @@ Examples:
             recon = result.get('reconsideration_log', [])
             print(f"  Reconsideration Events:   {len(recon)}")
             print("=" * 70)
-
-            # Generate summary plot for headless/batch single runs
-            if sim_mode != 'gui' and _ANALYSIS_AVAILABLE:
-                try:
-                    import matplotlib
-                    matplotlib.use('Agg')  # non-interactive backend for headless
-                    import matplotlib.pyplot as plt
-
-                    history = result.get('history', {})
-                    fig = plot_simulation_summary(
-                        result, history,
-                        env=sim.environment,
-                        output_path="output/summary.png"
-                    )
-                    plt.close(fig)
-                    print("  Summary figure saved to output/summary.png")
-                except Exception as e:
-                    print(f"  (Could not generate summary figure: {e})")
 
     except KeyboardInterrupt:
         print("\n\n⚠️  Simulation interrupted by user")

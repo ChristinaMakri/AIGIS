@@ -81,6 +81,7 @@ class CivilianAgent(Agent):
         self.current_edge_density = 0.0  # Local agent density on current edge (for Greenshields)
         self.evacuation_ordered = False  # Commander ordered evacuation
         self.redirect_to_coast = False  # Shelter-in-place order (Phase 3)
+        self.is_evacuated = False  # True once civilian reaches a safe zone
 
         # ===== SOCIAL BONDS (Psychology Factor) =====
         # 30% of civilians have family, adding panic when separated
@@ -134,12 +135,14 @@ class CivilianAgent(Agent):
                     self.beliefs.add('evacuation_ordered')
                     self.evacuation_ordered = True
                     self.panic_level = min(1.0, self.panic_level + 0.3)  # Significant panic increase
+                    self.family_separated = False  # Mass evacuation: family assumed moving together
 
                 # Shelter-in-Place (Phase 3): Too late to evacuate, seek nearest safe zone
                 elif msg_type == 'REDIRECT_TO_SAFE_ZONE':
                     self.beliefs.add('shelter_in_place')
                     self.redirect_to_coast = True  # Flag to re-route to nearest safe zone
                     self.panic_level = min(1.0, self.panic_level + 0.5)  # High panic!
+                    self.family_separated = False  # Emergency override: family concern drops
 
         # Check for visible fire and calculate distance
         self._check_fire_visibility_and_distance(environment)
@@ -279,11 +282,25 @@ class CivilianAgent(Agent):
     def _assess_local_density(self, environment) -> None:
         """
         Assess local agent density for Greenshields' traffic model.
-        This is a simplified version - in full implementation, count agents on current edge.
+        Counts nearby agents within a 2-cell radius to simulate edge density.
+        Uses nearby_agents from the previous step (populated by simulation after update).
         """
-        # Simplified: random density for now
-        # In real implementation: count agents within local radius
-        self.current_edge_density = np.random.uniform(0, self.rho_jam)
+        if self.grid_position is None or not self.nearby_agents:
+            self.current_edge_density = 0.0
+            return
+
+        my_row, my_col = self.grid_position
+        count = 0
+        for agent in self.nearby_agents:
+            if agent.grid_position is not None:
+                dist = np.sqrt(
+                    (agent.grid_position[0] - my_row) ** 2 +
+                    (agent.grid_position[1] - my_col) ** 2
+                )
+                if dist <= 2.0:  # immediate neighbourhood ≈ one road edge
+                    count += 1
+
+        self.current_edge_density = min(float(count), self.rho_jam)
 
     def _find_nearby_agents(self, all_agents: list) -> None:
         """
@@ -325,9 +342,16 @@ class CivilianAgent(Agent):
         """
         BDI reasoning cycle with 3-state cognitive machine.
         Cognitive state determines decision quality.
+        Shelter-in-place always overrides herding — civilians must reach safe zone.
         """
+        # Shelter-in-place ALWAYS overrides cognitive state.
+        # _move_to_safety() detects this belief and routes to nearest safe node.
+        if 'shelter_in_place' in self.beliefs:
+            self.intentions = ['evacuate']
+            return
+
         # Intention revision based on beliefs
-        if 'evacuation_ordered' in self.beliefs or 'fire_nearby' in self.beliefs or 'shelter_in_place' in self.beliefs:
+        if 'evacuation_ordered' in self.beliefs or 'fire_nearby' in self.beliefs:
             if 'evacuate' not in self.intentions:
                 self.intentions.clear()
                 self.intentions.append('evacuate')
@@ -435,16 +459,22 @@ class CivilianAgent(Agent):
             self._move_random(environment)
             return
 
-        # Calculate average movement direction from nearby agents
+        # Calculate inverse-distance-weighted average movement direction.
+        # Agents closer to self have stronger influence (realistic social force model).
         avg_direction = np.zeros(2, dtype=np.float32)
-        valid_agents = 0
+        total_weight = 0.0
+        my_row, my_col = self.grid_position
 
         for agent in self.nearby_agents:
-            if hasattr(agent, 'last_movement') and agent.last_movement is not None:
-                avg_direction += agent.last_movement
-                valid_agents += 1
+            if (hasattr(agent, 'last_movement') and agent.last_movement is not None
+                    and agent.grid_position is not None):
+                other_row, other_col = agent.grid_position
+                dist = max(1.0, np.sqrt((other_row - my_row) ** 2 + (other_col - my_col) ** 2))
+                weight = 1.0 / dist  # closer agents have more influence
+                avg_direction += agent.last_movement * weight
+                total_weight += weight
 
-        if valid_agents == 0 or np.linalg.norm(avg_direction) == 0:
+        if total_weight == 0 or np.linalg.norm(avg_direction) == 0:
             # No valid movement data, move randomly
             self._move_random(environment)
             return

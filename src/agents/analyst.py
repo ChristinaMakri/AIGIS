@@ -17,7 +17,9 @@ from ..config import (
     ANALYST_TTI_NEAR,
     ANALYST_EXIT_BOTTLENECK_THRESHOLD,
     WIND_SPEED,
-    WIND_DIRECTION
+    WIND_INITIAL_DIRECTION,
+    WIND_OSCILLATION_PERIOD,
+    WIND_OSCILLATION_AMPLITUDE
 )
 
 # Step-ahead fire predictor (optional — gracefully degrades if unavailable)
@@ -217,14 +219,17 @@ class AnalystAgent(Agent):
             self.ros_value = 0.0
             return
 
-        # Find closest fire to settlement (simplified: use agent position)
+        # Find closest fire to the map centre (population proxy).
+        # Using the analyst's own position was inaccurate if it spawned away from civilians.
+        center_lat = getattr(environment, 'lat_center', self.position[0])
+        center_lon = getattr(environment, 'lon_center', self.position[1])
+
         min_distance = float('inf')
         closest_fire = None
 
         for report in self.fire_reports:
             lat, lon = report['lat'], report['lon']
-            # Calculate distance from analyst position (proxy for settlement)
-            dist = np.sqrt((lat - self.position[0])**2 + (lon - self.position[1])**2) * 111320  # Convert to meters
+            dist = np.sqrt((lat - center_lat)**2 + (lon - center_lon)**2) * 111320  # metres
 
             if dist < min_distance:
                 min_distance = dist
@@ -245,10 +250,12 @@ class AnalystAgent(Agent):
         c1 = min(environment.elevation_grid.shape[1] - 1, fire_col + 1)
         patch = environment.elevation_grid[r0:r1+1, c0:c1+1]
         if patch.shape[0] >= 2 and patch.shape[1] >= 2:
-            slope_percentage = float(
-                np.max(np.abs(np.diff(patch, axis=0))) +
-                np.max(np.abs(np.diff(patch, axis=1)))
-            ) * 100.0
+            radius = getattr(environment, 'radius', 2000.0)
+            cell_h = (2.0 * radius) / environment.elevation_grid.shape[0]
+            cell_w = (2.0 * radius) / environment.elevation_grid.shape[1]
+            dz_row = float(np.max(np.abs(np.diff(patch, axis=0)))) / cell_h
+            dz_col = float(np.max(np.abs(np.diff(patch, axis=1)))) / cell_w
+            slope_percentage = (dz_row + dz_col) * 100.0
         else:
             slope_percentage = 0.0
 
@@ -269,8 +276,19 @@ class AnalystAgent(Agent):
                 grad_y, grad_x = np.gradient(environment.elevation_grid)
                 slope_grid = np.sqrt(grad_y**2 + grad_x**2).astype(np.float32)
 
-                # Use current wind direction from environment if available
-                wind_vec = np.array(WIND_DIRECTION, dtype=np.float32)
+                # Recompute current dynamic wind direction (mirrors FireSimulation)
+                step = environment.step_count
+                if step == 0:
+                    _wd = WIND_INITIAL_DIRECTION
+                else:
+                    _wd = WIND_INITIAL_DIRECTION + (
+                        np.sin(step / WIND_OSCILLATION_PERIOD) * WIND_OSCILLATION_AMPLITUDE
+                    )
+                _wr = np.radians(_wd)
+                wind_vec = np.array([np.sin(_wr), -np.cos(_wr)], dtype=np.float32)
+                _wm = np.linalg.norm(wind_vec)
+                if _wm > 1e-10:
+                    wind_vec = wind_vec / _wm
 
                 prob_grid = self.step_ahead_predictor.predict(
                     fire_grid=environment.fire_grid,

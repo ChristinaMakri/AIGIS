@@ -20,7 +20,8 @@ class AIGISSimulation:
     Handles agent updates, message routing, and metrics tracking.
     """
 
-    def __init__(self, lat: float, lon: float, radius: float, mode: str = 'gui', run_id: int = 0):
+    def __init__(self, lat: float, lon: float, radius: float, mode: str = 'gui',
+                 run_id: int = 0, fire_locations: list = None):
         """
         Initialize simulation.
 
@@ -30,6 +31,8 @@ class AIGISSimulation:
             radius: Map radius in meters
             mode: 'gui' or 'batch'
             run_id: Unique ID for Monte Carlo runs (default 0 for single runs)
+            fire_locations: List of (lat, lon) tuples for real fire ignition points.
+                            If None, ignites at highest-elevation fuel zones.
         """
         self.mode = mode
         self.lat, self.lon, self.radius = lat, lon, radius
@@ -52,6 +55,9 @@ class AIGISSimulation:
 
         # Initialize fire simulation
         self.fire_sim = FireSimulation(self.environment)
+
+        # Ignite fires from real coordinates or highest-elevation fuel zones
+        self._ignite_fires(fire_locations)
 
         # Initialize agents
         self.agents = self._initialize_agents()
@@ -77,6 +83,36 @@ class AIGISSimulation:
         }
 
         self.step = 0
+
+    def _ignite_fires(self, fire_locations: list) -> None:
+        """
+        Ignite fires using real coordinates.
+
+        If fire_locations is provided (e.g., from CLI or FIRMS), ignites there.
+        Otherwise, ignites at the highest-elevation fuel cells — topographically
+        realistic, as wildfires typically start on ridges and hillsides.
+        """
+        if fire_locations:
+            print(f"  🛰️  Igniting {len(fire_locations)} fires from provided coordinates...")
+            self.fire_sim.ignite_at_locations(fire_locations)
+            return
+
+        # Fallback: ignite at highest-elevation fuel zones (realistic ignition)
+        print("  ⛰️  No fire coordinates provided — igniting at highest-elevation fuel zones...")
+        fuel_cells = np.argwhere(self.environment.fire_grid == 3)
+        if len(fuel_cells) == 0:
+            print("  ⚠️  No fuel cells available to ignite")
+            return
+
+        elevations = self.environment.elevation_grid[fuel_cells[:, 0], fuel_cells[:, 1]]
+        num_ignition = min(3, len(fuel_cells))
+        top_indices = np.argpartition(elevations, -num_ignition)[-num_ignition:]
+        locations = []
+        for idx in top_indices:
+            r, c = fuel_cells[idx]
+            lat, lon = self.environment.grid_to_latlon(r, c)
+            locations.append((lat, lon))
+        self.fire_sim.ignite_at_locations(locations)
 
     def _load_population_data(self):
         """Load real population data from OSM if available"""
@@ -136,8 +172,77 @@ class AIGISSimulation:
         except Exception as e:
             print(f"  ⚠️  Failed to load weather data: {e}")
 
+    def _fetch_station_positions(self) -> list:
+        """
+        Fetch real fire/emergency station positions from OSM.
+        Returns list of (lat, lon) tuples.
+        Falls back to road network nodes near the map centre if none found.
+        """
+        import osmnx as ox
+        center_lat = self.environment.lat_center
+        center_lon = self.environment.lon_center
+        positions = []
+        try:
+            gdf = ox.features_from_point(
+                (center_lat, center_lon),
+                tags={'amenity': ['fire_station', 'police', 'hospital']},
+                dist=self.radius
+            )
+            for _, row in gdf.iterrows():
+                geom = row.geometry
+                if geom.geom_type == 'Point':
+                    positions.append((geom.y, geom.x))
+                else:
+                    c = geom.centroid
+                    positions.append((c.y, c.x))
+            if positions:
+                print(f"  ✅ Found {len(positions)} real emergency service locations from OSM")
+        except Exception:
+            pass  # Fall through to road-network fallback
+
+        if not positions:
+            # Use road network nodes closest to map centre as station proxies
+            print("  ℹ️  No OSM emergency stations found — using road-network positions")
+            nodes = [(data['y'], data['x'])
+                     for _, data in self.environment.graph.nodes(data=True)
+                     if 'y' in data and 'x' in data]
+            if nodes:
+                nodes.sort(key=lambda p: (p[0] - center_lat)**2 + (p[1] - center_lon)**2)
+                positions = nodes[:max(NUM_RESCUERS + NUM_FIREFIGHTERS, 10)]
+        return positions
+
+    def _civilian_positions(self) -> list:
+        """
+        Build civilian spawn positions from real road network nodes,
+        weighted by population density when available.
+        Returns list of (lat, lon) tuples of length NUM_CIVILIANS.
+        """
+        nodes = [(data['y'], data['x'])
+                 for _, data in self.environment.graph.nodes(data=True)
+                 if 'y' in data and 'x' in data]
+
+        if not nodes:
+            # Minimal fallback graph — place on the centre node
+            lat, lon = self.environment.lat_center, self.environment.lon_center
+            return [(lat, lon)] * NUM_CIVILIANS
+
+        lats = np.array([p[0] for p in nodes])
+        lons = np.array([p[1] for p in nodes])
+
+        # Compute per-node population weight from density grid
+        weights = np.ones(len(nodes), dtype=np.float64)
+        pop = self.environment.population_density
+        if pop is not None and pop.max() > 0:
+            for idx, (lat, lon) in enumerate(zip(lats, lons)):
+                r, c = self.environment.latlon_to_grid(lat, lon)
+                weights[idx] = max(pop[r, c], 1e-6)
+
+        weights /= weights.sum()
+        chosen = np.random.choice(len(nodes), size=NUM_CIVILIANS, replace=True, p=weights)
+        return [(lats[i], lons[i]) for i in chosen]
+
     def _initialize_agents(self) -> Dict[str, Any]:
-        """Create all 6 agent types"""
+        """Create all 6 agent types using real geographic data for positioning."""
         agents = {
             'sentinels': [],
             'analyst': None,
@@ -147,62 +252,56 @@ class AIGISSimulation:
             'civilians': []
         }
 
-        # Get bounds for positioning
         min_lon, min_lat, max_lon, max_lat = self.environment.bounds
-        center_lat = (min_lat + max_lat) / 2
-        center_lon = (min_lon + max_lon) / 2
+        center_lat = self.environment.lat_center
+        center_lon = self.environment.lon_center
 
-        # Sentinel agents - positioned around the perimeter
+        # --- Sentinels: evenly-spaced perimeter circle (aerial surveillance coverage) ---
         print(f"  🔭 Creating {NUM_SENTINELS} Sentinel agents...")
         for i in range(NUM_SENTINELS):
             angle = (2 * np.pi * i) / NUM_SENTINELS
             offset = 0.4
             lat = center_lat + offset * (max_lat - min_lat) * np.sin(angle)
             lon = center_lon + offset * (max_lon - min_lon) * np.cos(angle)
-
             sentinel = SentinelAgent(f"sentinel_{i}", (lat, lon))
             sentinel.grid_position = self.environment.latlon_to_grid(lat, lon)
             agents['sentinels'].append(sentinel)
 
-        # Analyst agent - central position
+        # --- Analyst + Commander: map centre ---
         print("  🧠 Creating Analyst agent...")
         agents['analyst'] = AnalystAgent("analyst", (center_lat, center_lon))
         agents['analyst'].grid_position = self.environment.latlon_to_grid(center_lat, center_lon)
 
-        # Commander agent - central position
         print("  ⚔️  Creating Commander agent...")
         agents['commander'] = CommanderAgent("commander", (center_lat, center_lon))
         agents['commander'].grid_position = self.environment.latlon_to_grid(center_lat, center_lon)
 
-        # Rescuer agents - positioned near center
+        # --- Rescuers + Firefighters: real OSM emergency stations ---
+        station_positions = self._fetch_station_positions()
+        total_emergency = NUM_RESCUERS + NUM_FIREFIGHTERS
+
+        # Cycle through stations if fewer stations than agents needed
+        def station_at(idx):
+            return station_positions[idx % len(station_positions)]
+
         print(f"  🚑 Creating {NUM_RESCUERS} Rescuer agents...")
         for i in range(NUM_RESCUERS):
-            lat = center_lat + np.random.uniform(-0.3, 0.3) * (max_lat - min_lat)
-            lon = center_lon + np.random.uniform(-0.3, 0.3) * (max_lon - min_lon)
-
+            lat, lon = station_at(i)
             rescuer = RescuerAgent(f"rescuer_{i}", (lat, lon))
             rescuer.grid_position = self.environment.latlon_to_grid(lat, lon)
             agents['rescuers'].append(rescuer)
 
-        # Firefighter agents - positioned strategically
         print(f"  🚒 Creating {NUM_FIREFIGHTERS} Firefighter agents...")
         for i in range(NUM_FIREFIGHTERS):
-            # Position firefighters near edges for better coverage
-            angle = (2 * np.pi * i) / NUM_FIREFIGHTERS
-            offset = 0.3
-            lat = center_lat + offset * (max_lat - min_lat) * np.sin(angle)
-            lon = center_lon + offset * (max_lon - min_lon) * np.cos(angle)
-
+            lat, lon = station_at(NUM_RESCUERS + i)
             firefighter = FirefighterAgent(f"firefighter_{i}", (lat, lon))
             firefighter.grid_position = self.environment.latlon_to_grid(lat, lon)
             agents['firefighters'].append(firefighter)
 
-        # Civilian agents - random positions
+        # --- Civilians: road network nodes weighted by population density ---
         print(f"  🏃 Creating {NUM_CIVILIANS} Civilian agents...")
-        for i in range(NUM_CIVILIANS):
-            lat = np.random.uniform(min_lat, max_lat)
-            lon = np.random.uniform(min_lon, max_lon)
-
+        civ_positions = self._civilian_positions()
+        for i, (lat, lon) in enumerate(civ_positions):
             civilian = CivilianAgent(f"civilian_{i}", (lat, lon))
             civilian.grid_position = self.environment.latlon_to_grid(lat, lon)
             agents['civilians'].append(civilian)
@@ -319,8 +418,7 @@ class AIGISSimulation:
         civilians = self.agents['civilians']
 
         for civilian in civilians:
-            if civilian.cognitive_state == "herding":
-                # Find nearby civilians for herding
+            if civilian.is_active:
                 civilian._find_nearby_agents(civilians)
 
     def _collect_metrics(self):
@@ -362,7 +460,8 @@ class AIGISSimulation:
         count = 0
         for civilian in self.agents['civilians']:
             if not civilian.is_active:
-                count += 1
+                if not civilian.is_evacuated:
+                    count += 1
                 continue
 
             if civilian.grid_position:
@@ -378,12 +477,17 @@ class AIGISSimulation:
         """Count civilians that reached safe zones"""
         count = 0
         for civilian in self.agents['civilians']:
+            if civilian.is_evacuated:
+                count += 1
+                continue
             if not civilian.is_active:
                 continue
 
             if civilian.current_node is not None:
                 # Check if at a safe node
                 if self.environment.is_safe_node(civilian.current_node):
+                    civilian.is_evacuated = True
+                    civilian.is_active = False
                     count += 1
 
         return count
@@ -396,11 +500,11 @@ class AIGISSimulation:
         if fire_stats['burning_cells'] == 0 and fire_stats['fuel_cells'] == 0:
             return True
 
-        # Complete if all civilians evacuated or casualties
+        # Complete if all civilians are either evacuated or casualties
+        self.count_evacuated()  # mark newly evacuated civilians as inactive
         active_civilians = sum(1 for c in self.agents['civilians'] if c.is_active)
-        evacuated = self.count_evacuated()
 
-        if active_civilians == evacuated or active_civilians == 0:
+        if active_civilians == 0:
             return True
 
         return False

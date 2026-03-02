@@ -138,6 +138,9 @@ class CommanderAgent(Agent):
         The Commander is a "command center" agent that doesn't directly sense the
         environment but relies on reports from specialized sensor/analysis agents.
         """
+        # Store environment early so decide() can access it for ML predictions
+        self.environment = environment
+
         for message in self.messages_inbox:
             # ===== RISK REPORTS FROM ANALYST =====
             if message.performative == "INFORM":
@@ -319,6 +322,8 @@ class CommanderAgent(Agent):
         for cfp_id, proposals in list(self.pending_proposals.items()):
             if proposals:
                 self._select_best_proposal(cfp_id, proposals)
+            else:
+                del self.pending_proposals[cfp_id]  # All agents refused; clean up
 
     def _reevaluate_strategy(self) -> None:
         """
@@ -446,8 +451,19 @@ class CommanderAgent(Agent):
 
         self.ect = self._calculate_ect(num_civilians)
 
-        # Determine current phase
+        # Determine current phase from ECT vs TTI logic
         new_phase = self._determine_phase(self.tti, self.ect)
+
+        # Apply ML-based minimum phase floor.
+        # ML predictions cannot lower the phase, only raise it.
+        if self.ml_predictions:
+            ml_risk = self.ml_predictions.get('risk_level', 'MEDIUM')
+            ml_min_phase = {'LOW': 0, 'MEDIUM': 0, 'HIGH': 1, 'CRITICAL': 2}.get(ml_risk, 0)
+            if ml_min_phase > new_phase:
+                if LOG_PHASE_TRANSITIONS:
+                    print(f"  ML override: {ml_risk} risk → phase escalated "
+                          f"{new_phase} → {ml_min_phase}")
+                new_phase = ml_min_phase
 
         # Log phase transitions and record commitment
         if new_phase != self.current_phase:

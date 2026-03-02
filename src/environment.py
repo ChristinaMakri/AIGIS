@@ -57,6 +57,9 @@ class Environment:
         self.obstacle_grid = obstacle_grid
         self.elevation_grid = elevation_grid
         self.bounds = bounds  # (min_lon, min_lat, max_lon, max_lat)
+        min_lon, min_lat, max_lon, max_lat = bounds
+        self.lat_center = (min_lat + max_lat) / 2.0
+        self.lon_center = (min_lon + max_lon) / 2.0
         self.grid_shape = grid_shape
         self.safe_nodes = safe_nodes  # Set of node IDs that are safe zones
         self.radius = radius  # Map radius in meters (used for cell→metres conversion)

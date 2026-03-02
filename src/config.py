@@ -99,6 +99,14 @@ FIRE_TEMP_AMBIENT = 20.0  # °C - Ambient temperature (baseline)
 # Fuel Model Definitions
 # Based on Anderson's 13 Fire Behavior Fuel Models
 FUEL_MODELS = {
+    # Non-fuel areas (urban, water, roads) — fire cannot spread here
+    0: {
+        'name': 'No Fuel',
+        'spread_multiplier': 0.0,   # fire cannot spread through non-fuel cells
+        'intensity_multiplier': 0.0,
+        'burnout_prob': 0.0         # never burns out (never ignites)
+    },
+
     # Grass Fuels (fast spread, low intensity)
     1: {  # Short Grass (1 foot)
         'name': 'Short Grass',
@@ -243,10 +251,11 @@ SENTINEL_DEBOUNCE_STEPS = 3  # Must detect for N consecutive steps (prevents fal
 # Analyst uses fuzzy logic to assess risk based on Time To Impact (TTI) and
 # escape route availability. These thresholds define linguistic variables.
 
-# Time To Impact (TTI) Thresholds (meters)
-ANALYST_TTI_IMMINENT = 30  # Fire is imminent (0-30 meters)
-ANALYST_TTI_NEAR = 70  # Fire approaching (30-70 meters)
-# Above 70 meters = distant threat
+# Time To Impact (TTI) Thresholds (seconds)
+# TTI = distance_to_population / ROS  → units are seconds
+ANALYST_TTI_IMMINENT = 30  # Fire arrives within 30 seconds → imminent
+ANALYST_TTI_NEAR = 70      # Fire arrives within 70 seconds → near future
+# Above 70 seconds = distant threat
 
 # Escape Route Thresholds
 ANALYST_EXIT_BOTTLENECK_THRESHOLD = 2  # Number of exits (0-2 = bottlenecked, 2+ = sufficient)

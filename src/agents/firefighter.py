@@ -86,7 +86,33 @@ class FirefighterAgent(Agent):
 
         # Check messages for coordination
         for message in self.messages_inbox:
-            pass  # No relevant message types currently handled
+            if message.performative == "CFP":
+                # Commander is requesting a firefighting mission.
+                # Respond with PROPOSE if available, REFUSE if not.
+                if not self.is_refilling and self.current_water >= self.water_per_drop:
+                    propose = Message(
+                        sender=self.agent_id,
+                        receiver=message.sender,
+                        performative="PROPOSE",
+                        content={
+                            'cost': 1.0,
+                            'eta': 1,
+                            'path_risk': 0.0,
+                            'target': message.content.get('target_location')
+                        },
+                        conversation_id=message.conversation_id
+                    )
+                    self.send_message(propose)
+                else:
+                    reason = 'refilling' if self.is_refilling else 'no_water'
+                    refuse = Message(
+                        sender=self.agent_id,
+                        receiver=message.sender,
+                        performative="REFUSE",
+                        content={'reason': reason},
+                        conversation_id=message.conversation_id
+                    )
+                    self.send_message(refuse)
 
     def decide(self) -> None:
         """

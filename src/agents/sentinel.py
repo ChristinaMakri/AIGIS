@@ -13,7 +13,9 @@ from ..config import (
     SENTINEL_NOISE_SIGMA,
     SENTINEL_TRIGGER_THRESHOLD,
     SENTINEL_DEBOUNCE_STEPS,
-    WIND_DIRECTION
+    WIND_INITIAL_DIRECTION,
+    WIND_OSCILLATION_PERIOD,
+    WIND_OSCILLATION_AMPLITUDE
 )
 
 
@@ -64,12 +66,15 @@ class SentinelAgent(Agent):
         self.debounce_steps = SENTINEL_DEBOUNCE_STEPS  # Consecutive detections required
 
         # ===== WIND DIRECTION (for signal attenuation) =====
-        # Wind carries smoke/heat toward sensor → increases detection probability
-        # Wind blowing away from sensor → decreases detection probability
-        self.wind_direction = np.array(WIND_DIRECTION, dtype=np.float32)
+        # Initialised to the static starting direction; updated each step in perceive()
+        # to mirror FireSimulation's dynamic oscillating wind model.
+        wind_rad = np.radians(WIND_INITIAL_DIRECTION)
+        self.wind_direction = np.array(
+            [np.sin(wind_rad), -np.cos(wind_rad)], dtype=np.float32
+        )
         wind_mag = np.linalg.norm(self.wind_direction)
-        if wind_mag > 0:
-            self.wind_direction = self.wind_direction / wind_mag  # Normalize
+        if wind_mag > 1e-10:
+            self.wind_direction = self.wind_direction / wind_mag
 
         # ===== DEBOUNCING: PREVENT FALSE ALARMS =====
         # Requires N consecutive detections before triggering alert
@@ -81,7 +86,23 @@ class SentinelAgent(Agent):
         """
         Scan local area for fire using Signal Detection Theory.
         Signal equation: I_detected = I_actual/(d^2 + ε) * (1 + cos(θ)) + N(0,σ)
+        Wind direction is updated every step to match FireSimulation's dynamic model:
+        θ(t) = θ_0 + sin(t / T) × A
         """
+        # ===== UPDATE DYNAMIC WIND DIRECTION =====
+        # Mirrors FireSimulation._update_wind_vector() so detection is wind-consistent.
+        step = environment.step_count
+        if step == 0:
+            wind_degrees = WIND_INITIAL_DIRECTION
+        else:
+            oscillation = np.sin(step / WIND_OSCILLATION_PERIOD)
+            wind_degrees = WIND_INITIAL_DIRECTION + oscillation * WIND_OSCILLATION_AMPLITUDE
+        wind_rad = np.radians(wind_degrees)
+        wind_vec = np.array([np.sin(wind_rad), -np.cos(wind_rad)], dtype=np.float32)
+        wind_mag = np.linalg.norm(wind_vec)
+        if wind_mag > 1e-10:
+            self.wind_direction = wind_vec / wind_mag
+
         self.detected_fires.clear()
 
         if self.grid_position is None:
