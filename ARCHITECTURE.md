@@ -1,778 +1,446 @@
-# AIGIS System Architecture & Business Logic
+# AIGIS System Architecture
 
 ## Table of Contents
-1. [System Overview](#system-overview)
-2. [Agent Architectures](#agent-architectures)
-3. [Decision Logic](#decision-logic)
-4. [Communication Protocol](#communication-protocol)
-5. [Core Algorithms](#core-algorithms)
-6. [Data Flow](#data-flow)
+1. [System Overview](#1-system-overview)
+2. [Agent Architectures](#2-agent-architectures)
+3. [Communication Topology](#3-communication-topology)
+4. [Core Algorithms](#4-core-algorithms)
+5. [Data Flow](#5-data-flow)
+6. [Performance](#6-performance)
 
 ---
 
-## System Overview
+## 1. System Overview
 
-AIGIS is a **Multi-Agent System (MAS)** for disaster management simulation featuring 5 autonomous agents with different architectural patterns, demonstrating how heterogeneous agents collaborate in crisis scenarios.
+AIGIS is a Multi-Agent System (MAS) for wildfire disaster management. Eight autonomous agents with different architectural patterns collaborate in a shared stochastic environment.
 
-### Core Philosophy
-- **Location-Agnostic**: Works anywhere globally using OpenStreetMap
-- **Physics-Based**: Rothermel fire model, Greenshields traffic, Social Force herding
-- **Scientifically Grounded**: Each agent uses established AI architectures and real-world models
-- **Research-Ready**: Monte Carlo experiments with statistical analysis
+### Design Principles
+- **Location-Agnostic**: any geographic coordinates via OpenStreetMap
+- **Physics-Based**: Rothermel fire, Greenshields traffic, CAMS smoke, FWI risk
+- **Bibliography-Grounded**: every model equation cites its source (see PHYSICS_MODELS.md)
+- **Layered Communication**: Sensing -> Analysis -> Command -> Field (no Sentinel-to-Commander shortcuts)
 
----
+### Environment State (shared across all agents)
 
-## Agent Architectures
+| Grid | Type | Description |
+|------|------|-------------|
+| `fire_grid` | int8 | 0=no fuel, 1=burning, 2=burnt, 3=fuel |
+| `temperature_grid` | float32 | 0–100 C for risk assessment |
+| `smoke_grid` | float32 | 0–1 smoke concentration (CAMS model) |
+| `elevation_grid` | float32 | SRTM elevation in metres |
+| `fuel_type_grid` | int8 | NFFL fuel model 0–13 |
+| `obstacle_grid` | int8 | 0=passable, 1=obstacle |
+| `ignition_risk_grid` | float32 | 0–1 pre-ignition risk (RiskMonitor) |
+| `firms_density` | float32 | 0–1 historical ignition density (FIRMS) |
 
-### 1. Sentinel Agent - **Reactive Architecture**
-
-**Purpose**: Fire detection sensors distributed around the perimeter
-
-**Architecture Pattern**: Simple Reflex Agent (Condition-Action Rules)
-
-**Business Logic**:
-```
-IF fire_detected_in_vision_radius THEN
-    IF consecutive_detections >= 3 THEN  // Debouncing
-        SEND fire_alert TO analyst
-    END IF
-END IF
-```
-
-**Key Features**:
-- **Signal Detection Theory**: `I_detected = I_actual/(d² + ε) × (1 + cos(θ)) + N(0,σ)`
-- **Environmental Attenuation**: Distance and wind affect detection accuracy
-- **Debouncing Protocol**: Requires 3 consecutive detections to avoid false positives
-- **No Memory**: Purely reactive - responds only to current perceptions
-
-**Decision Trigger**: Fire cell enters vision radius
+Scalar state: `fwi_data`, `air_quality_index`, `hospital_nodes`, `safe_nodes`, `step_count`
 
 ---
 
-### 2. Analyst Agent - **Model-Based Reflex Architecture**
+## 2. Agent Architectures
 
-**Purpose**: Risk assessment and fire spread prediction
+### 2.1 Sentinel — Reactive (Signal Detection Theory)
 
-**Architecture Pattern**: Model-Based Agent (maintains internal model of world state)
+**Architecture**: Simple Reflex Agent
 
-**Business Logic**:
+**Decision rule**:
 ```
-PERCEIVE:
-    Collect fire_reports FROM sentinels
-    Build fire_map (internal world model)
-
-DECIDE:
-    FOR each fire location:
-        Calculate ROS using Rothermel model
-        ROS = R_base × (1 + φ_wind) × (1 + φ_slope)
-
-        Calculate TTI (Time To Impact)
-        TTI = distance_to_population / ROS
-
-    END FOR
-
-    Apply Fuzzy Logic:
-    IF TTI < 5min AND exits_blocked THEN
-        risk = CRITICAL
-    ELSE IF TTI < 15min THEN
-        risk = HIGH
-    ELSE
-        risk = MEDIUM
-    END IF
-
-ACT:
-    SEND risk_report TO commander
-    Report: {max_risk, TTI, ROS, num_exits}
+IF I_detected > THRESHOLD for 3 consecutive steps:
+    SEND FIRE_DETECTION INFORM to analyst
 ```
 
-**Key Features**:
-- **Internal Model**: Maintains fire map from sensor reports
-- **Rothermel Physics**: Rate of Spread based on wind, slope, fuel
-- **Fuzzy Logic Risk Assessment**: 3 fuzzy variables (TTI, exit capacity, fire intensity)
-- **Predictive**: Projects future fire behavior
+Detection equation (Green & Swets 1966):
+```
+I_detected = [I_actual / (d^2 + epsilon)] x (1 + cos(theta)) + N(0, sigma)
+```
 
-**Decision Trigger**: New fire reports OR periodic re-evaluation (every 10 steps)
+No memory. Purely input-output. Four instances placed at map corners.
 
 ---
 
-### 3. Commander Agent - **Hybrid (Utility-Based + Deliberative)**
+### 2.2 Analyst — BDI Information Processing
 
-**Purpose**: Strategic decision making and resource coordination
+**Architecture**: BDI with internal fire model
 
-**Architecture Pattern**: Hybrid Architecture with ECT vs TTI logic
+**Beliefs**: `fire_reports` list, `current_phase`, `suppressed_cells`
 
-**Business Logic**:
-```
-PERCEIVE:
-    Receive risk_report FROM analyst
-    Extract: TTI, ROS, num_exits
-    Track active_missions status
+**Perceive**:
+- Collect `FIRE_DETECTION` INFORM from sentinels -> append to `fire_reports`
+- `PHASE_UPDATE` INFORM from Commander -> update `current_phase`
+- `SUPPRESSION_UPDATE` INFORM from firefighters -> add cell to `suppressed_cells`
 
-DECIDE:
-    // Calculate Evacuation Clearance Time
-    ECT = (N_civilians / (C_exit × num_exits)) × γ_congestion
+**Decide**:
+- Filter `fire_reports` by `suppressed_cells` (remove extinguished cells)
+- Compute ROS and TTI using Rothermel (1972)
+- If `current_phase >= 2`: apply 20% TTI conservatism (`TTI *= 0.80`)
 
-    // Determine Phase based on TTI/ECT ratio
-    IF TTI > 2.5 × ECT THEN
-        phase = 0  // Monitoring
-    ELSE IF TTI > 1.5 × ECT THEN
-        phase = 1  // Pre-Alert
-    ELSE IF TTI > 1.0 × ECT THEN
-        phase = 2  // Mass Evacuation
-    ELSE
-        phase = 3  // Shelter-in-Place (TOO LATE!)
-    END IF
-
-    // Evaluate pending rescue proposals
-    FOR each proposal IN pending_proposals:
-        utility = w_safety × (100/ETA)
-                - w_cost × cost
-                - w_congestion × active_missions
-
-        IF utility > best_utility THEN
-            best_proposal = proposal
-        END IF
-    END FOR
-
-ACT:
-    // Phase-specific actions
-    CASE phase:
-        0: Monitor (no action)
-        1: BROADCAST warning TO civilians
-        2: BROADCAST evacuation_order TO civilians
-           SEND CFP (rescue missions) TO rescuers
-        3: BROADCAST redirect_to_safe_zone TO civilians
-    END CASE
-
-    // Accept best rescue proposal
-    SEND accept_proposal TO best_rescuer
-    SEND reject_proposal TO other_rescuers
-```
-
-**Key Features**:
-- **ECT Calculation**: `ECT = (N_agents / C_exit) × γ` where γ accounts for congestion
-- **4-Phase Protocol**:
-  - Phase 0: Monitoring (TTI > 2.5×ECT)
-  - Phase 1: Pre-Alert (1.5×ECT < TTI ≤ 2.5×ECT)
-  - Phase 2: Mass Evacuation (1.0×ECT < TTI ≤ 1.5×ECT)
-  - Phase 3: Shelter-in-Place (TTI ≤ ECT) → Too late, go to nearest safe zone
-- **Contract Net Protocol**: Sends CFP, evaluates proposals, selects best bid
-- **Utility Function**: Balances safety, cost, and congestion
-- **Re-evaluation**: Periodically reassesses strategy (Commitment with Evaluation)
-
-**Decision Trigger**: Risk report received OR re-evaluation interval reached
+**Act**:
+- Send `FIRE_ANALYSIS` INFORM to Commander: `{tti, ros, num_exits, risk_level}`
 
 ---
 
-### 4. Rescuer Agent - **Goal-Based (Practical Reasoning)**
+### 2.3 Commander — BDI + Hybrid (ECT vs TTI, CNP Manager)
 
-**Purpose**: Execute rescue missions with risk-aware pathfinding
+**Architecture**: BDI with utility-based phase selection; CNP Manager role
 
-**Architecture Pattern**: Goal-Based Agent with BDI elements
+**Perceive**:
+- `FIRE_ANALYSIS` INFORM from Analyst -> update `tti_value`
+- `RISK_FORECAST` INFORM from RiskMonitor -> update pre-fire positioning
+- `PROPOSE` from Rescuers/Firefighters/Ambulances -> accumulate proposals
+- `CONFIRM` from field units -> remove completed missions from tracking dicts
 
-**Business Logic**:
+**Decide** (4-phase logic):
 ```
-PERCEIVE:
-    Receive CFP FROM commander
-    Extract: mission_location, priority
+ECT = (N_civilians / (C_exit x num_exits)) x gamma_congestion
 
-DECIDE:
-    // Calculate path to mission location
-    path = A_star(current_position, mission_location)
-
-    // Assess risk along path
-    risk_score = 0
-    FOR each node IN path:
-        IF fire_grid[node] == BURNING THEN
-            risk_score = INFINITY  // REFUSE mission through fire!
-            BREAK
-        END IF
-        risk_score += temperature[node] × distance
-    END FOR
-
-    // Calculate bid
-    IF risk_score == INFINITY THEN
-        SEND refuse TO commander
-        RETURN
-    END IF
-
-    cost = path_length + (risk_score × α) + fuel_consumed
-    ETA = path_length / speed
-
-ACT:
-    SEND proposal TO commander
-    Content: {cost, ETA, risk_score}
-
-    IF accepted THEN
-        // Execute mission
-        WHILE NOT reached_target:
-            move_along_path()
-
-            // Dynamic re-routing if path becomes dangerous
-            IF fire_on_path THEN
-                recalculate_path()
-            END IF
-        END WHILE
-
-        SEND confirm (mission complete) TO commander
-    END IF
+phase = 0 if TTI > 2.5 x ECT
+phase = 1 if TTI > 1.5 x ECT   # dispatch firefighters
+phase = 2 if TTI > 1.0 x ECT   # dispatch all field units
+phase = 3 otherwise              # shelter-in-place
 ```
 
-**Key Features**:
-- **Risk-Aware Pathfinding**: Refuses missions through active fire
-- **A* Navigation**: Uses networkx shortest path with risk-weighted edges
-- **Dynamic Re-routing**: Recalculates path if conditions change
-- **Safety Protocol**: `IF fire_on_path THEN refuse OR reroute`
-- **Bidding System**: Cost = time + risk + fuel
+**Act** (phase-specific):
+- Phase 0: no action
+- Phase 1: WARNING to civilians + FIRE_SUPPRESSION_CFP to firefighters
+- Phase 2: EVACUATE to civilians + AMBULANCE_CFP + RESCUE_CFP + FIRE_SUPPRESSION_CFP
+- Phase 3: REDIRECT_TO_SAFE_ZONE to civilians
 
-**Decision Trigger**: CFP received OR mission accepted
+On phase transition: send `PHASE_UPDATE` INFORM to Analyst.
+
+Mission tracking dicts: `active_missions`, `ambulance_missions`, `firefighter_missions`
+All cleaned up on matching CONFIRM messages.
 
 ---
 
-### 5. Civilian Agent - **BDI (Belief-Desire-Intention)**
+### 2.4 RiskMonitor — Model-Based BDI (Pre-Ignition)
 
-**Purpose**: Evacuate with realistic panic psychology and crowd dynamics
+**Architecture**: Model-Based BDI
 
-**Architecture Pattern**: Full BDI with 3-state cognitive machine
+**Runs**: every `RISK_MONITOR_UPDATE_INTERVAL` steps (default 20)
 
-**Business Logic**:
+**Compute** (Van Wagner 1987, Anderson 1982, Schroeder 2014):
 ```
-PERCEIVE:
-    // Update beliefs from messages
-    IF warning_received THEN
-        ADD 'warning' TO beliefs
-        panic_level += 0.1
-    END IF
-
-    IF evacuation_ordered THEN
-        ADD 'evacuation_ordered' TO beliefs
-        panic_level += 0.3
-    END IF
-
-    IF shelter_in_place THEN
-        ADD 'shelter_in_place' TO beliefs
-        panic_level += 0.5  // High panic!
-        redirect_to_coast = TRUE
-    END IF
-
-    // Calculate fire distance
-    fire_distance = INFINITY
-    FOR each cell IN vision_radius:
-        IF fire_grid[cell] == BURNING THEN
-            fire_visible = TRUE
-            distance = euclidean_distance(position, cell)
-            fire_distance = MIN(fire_distance, distance)
-        END IF
-    END FOR
-
-    // Update panic using panic equation
-    IF fire_visible THEN
-        panic_level += α × (1 / fire_distance)
-    ELSE
-        panic_level -= decay_rate  // Decay when no fire
-    END IF
-
-    IF family_separated THEN
-        panic_level += β × 0.1
-    END IF
-
-    // Assess local traffic density
-    density = count_agents_nearby / area
-
-DECIDE:
-    // Determine cognitive state based on panic
-    IF panic_level < 0.4 THEN
-        cognitive_state = "rational"
-    ELSE IF panic_level < 0.7 THEN
-        cognitive_state = "confused"
-    ELSE
-        cognitive_state = "herding"
-    END IF
-
-    // Decision making per cognitive state
-    CASE cognitive_state:
-        rational:
-            intentions = ['evacuate']
-            // Use optimal A* pathfinding to nearest safe zone
-
-        confused:
-            intentions = ['evacuate']
-            // Occasionally reconsider path (hesitation)
-            IF random() < 0.2 THEN
-                clear_path()  // Force re-routing
-            END IF
-
-        herding:
-            // High panic - follow the crowd!
-            IF random() < 0.2 THEN
-                intentions = ['freeze']  // Panic freeze
-            ELSE IF nearby_agents > 0 THEN
-                intentions = ['follow_crowd']  // Social Force
-            ELSE
-                intentions = ['move_random']  // Panic movement
-            END IF
-    END CASE
-
-ACT:
-    // Calculate speed using Greenshields Traffic Model
-    V_current = V_free_flow × (1 - density / density_jam)
-
-    IF density >= density_jam THEN
-        V_current = 0  // GRIDLOCK!
-    END IF
-
-    // Apply cognitive state speed reduction
-    IF cognitive_state == "confused" THEN
-        V_current × 0.5  // 50% speed reduction
-    END IF
-
-    // Execute intention
-    CASE primary_intention:
-        'freeze':
-            // Do nothing (panic freeze)
-
-        'move_random':
-            // Random panic movement
-            direction = random()
-            position += direction × V_current
-
-        'follow_crowd':
-            // Social Force Model (Herding)
-            avg_direction = Σ(nearby_agents.movement) / count
-            position += avg_direction × V_current
-
-        'evacuate':
-            // Goal-directed movement to safe zone
-            IF path_empty OR redirect_to_coast THEN
-                safety_node = find_nearest_safe_node()  // OSM water/parks/edges
-                path = A_star(current_node, safety_node)
-            END IF
-
-            IF V_current > 0.1 THEN
-                next_node = path[1]
-                move_to(next_node)
-            ELSE
-                // GRIDLOCK - cannot move
-            END IF
-    END CASE
+risk = 0.40 x fwi_factor + 0.30 x fuel_factor + 0.20 x firms_factor + 0.10 x slope_factor
 ```
 
-**Key Features**:
-- **BDI Components**:
-  - **Beliefs**: {warning_received, evacuation_ordered, fire_visible, ...}
-  - **Desires**: {survive, reach_safety, find_family}
-  - **Intentions**: {evacuate, follow_crowd, freeze, move_random}
-- **3-State Cognitive Machine**:
-  - **Rational** (panic < 0.4): Optimal pathfinding, full speed
-  - **Confused** (0.4-0.7): 50% speed, frequent re-routing, hesitation
-  - **Herding** (panic ≥ 0.7): Follows crowd via Social Force, ignores optimal path
-- **Panic Equation**: `Panic(t) = Panic(t-1) + α×(1/d_fire) + β×(family_separated)`
-- **Greenshields Traffic Model**: `V = V_free × (1 - ρ/ρ_jam)` → Gridlock at jam density
-- **Social Force Herding**: Calculates average movement of nearby agents
-- **Dynamic Safe Zone Detection**: Uses OSM tags (water, parks) + map edges
+**Act**:
+- Write `environment.ignition_risk_grid`
+- Send `RISK_FORECAST` INFORM to Commander: top-3 risk cells (lat/lon), fwi, max_risk, mean_risk
 
-**Decision Trigger**: Every step (continuous perception-decision-action loop)
+Enables Commander to pre-position firefighters before fire ignition.
 
 ---
 
-## Communication Protocol
+### 2.5 Firefighter — BDI + Utility (CNP Contractor)
 
-### FIPA-ACL Message Structure
+**Architecture**: BDI with utility-based intention selection; CNP Contractor
 
-```python
-Message:
-    sender: agent_id
-    receiver: agent_id | "broadcast"
-    performative: FIPA_performative
-    content: dict
-    conversation_id: uuid
+**Mission states**: IDLE -> ASSIGNED -> SUPPRESSING
+
+**CNP flow**:
+```
+Commander --[FIRE_SUPPRESSION_CFP]--> Firefighter
+Firefighter --[PROPOSE {cost, eta}]--> Commander
+Commander --[ACCEPT_PROPOSAL]--> Firefighter  (sets mission_status=ASSIGNED)
+Firefighter --[CONFIRM {status:COMPLETED}]--> Commander
 ```
 
-### Performatives Used
+**Utility function** (decides between water_drop / fire_line / backburn):
+```
+U = w_threat x Threat + w_efficiency x Efficiency + w_coordination x Coordination
+  w_threat=0.5, w_efficiency=0.3, w_coordination=0.2
+```
 
-| Performative | Usage | Example |
-|--------------|-------|---------|
-| **INFORM** | Share information | Sentinel → Analyst: fire detected |
-| **REQUEST** | Request action | Commander → Civilians: evacuate |
-| **CFP** | Call For Proposal | Commander → Rescuers: rescue mission |
-| **PROPOSE** | Bid on task | Rescuer → Commander: proposal with cost |
-| **ACCEPT_PROPOSAL** | Accept bid | Commander → Rescuer: you're selected |
-| **REJECT_PROPOSAL** | Reject bid | Commander → Rescuer: bid rejected |
-| **REFUSE** | Refuse task | Rescuer → Commander: too dangerous |
-| **CONFIRM** | Task complete | Rescuer → Commander: mission done |
+**On successful water_drop**:
+- Sends `SUPPRESSION_UPDATE` INFORM to Analyst (cell removed from TTI calculation)
+- Sends `CONFIRM` to Commander (mission cleaned up)
 
-### Communication Flow
+**Fire-line placement** (Rothermel 1972): perpendicular to wind vector, 2 cells downwind.
+
+---
+
+### 2.6 Rescuer — BDI (Goal-Based CNP Contractor)
+
+**Architecture**: BDI with goal-directed navigation; CNP Contractor
+
+**Mission states**: IDLE -> TO_TARGET -> RETURNING
+
+**Path risk check**: Scans `temperature_grid` along A* path. Refuses if `max_temp > RESCUER_SAFETY_THRESHOLD`.
+
+**Bid formula**:
+```
+cost = path_length / speed + path_risk x RESCUER_RISK_ALPHA + (100 - fuel)
+```
+
+**Dynamic re-routing**: path recalculated every `RESCUER_PATH_RECALC_INTERVAL` steps or when next node is on fire.
+
+---
+
+### 2.7 Ambulance — BDI (Two-Phase Goal Stack, CNP Contractor)
+
+**Architecture**: BDI with two-leg goal stack; CNP Contractor
+
+**Mission states**: IDLE -> TO_SCENE -> TO_HOSPITAL -> RETURNING
+
+**Two dispatch paths**:
+
+1. Commander CFP (`AMBULANCE_CFP`): standard CNP bidding with `scene_node` and `hospital_node`
+2. Civilian INJURY_REPORT: direct self-dispatch — bypasses Commander CFP when smoke casualty needs immediate response (Inness 2019)
+
+**Safety**: aborts mission if next path node is in active fire. Refuses CFP if path risk exceeds `AMBULANCE_RISK_THRESHOLD`.
+
+---
+
+### 2.8 Civilian — BDI (Three-State Cognitive Machine)
+
+**Architecture**: BDI with crowd dynamics and smoke injury model
+
+**Three cognitive states** (Cova & Johnson 2002):
+
+| State | Panic | Behavior |
+|-------|-------|----------|
+| Rational | < 0.4 | Optimal A* to safety_node |
+| Confused | 0.4–0.7 | A* at 50% speed, stochastic re-route |
+| Herding | >= 0.7 | Social Force crowd-following |
+
+**Smoke injury loop** (Inness 2019):
+```
+smoke_exposure += smoke_grid[r, c]   each step
+if smoke_exposure >= threshold:
+    is_injured = True
+    send INJURY_REPORT to ambulances
+    halt movement
+```
+
+**Herding safety**: if crowd direction leads to burning cell, falls back to `_move_to_safety()`.
+
+**Social Force**: inverse-distance-weighted average of nearby agents' `last_movement` vectors.
+
+---
+
+## 3. Communication Topology
+
+Layered architecture — messages flow between defined pairs only:
 
 ```
-1. Fire Detection:
-   Sentinel --[INFORM: fire_detected]--> Analyst
+Sensing Layer
+  FIRMS/FWI data ---------> RiskMonitor
+  fire_grid/temperature ---> Sentinel
 
-2. Risk Assessment:
-   Analyst --[INFORM: risk_report]--> Commander
+Analysis Layer
+  Sentinel  --[FIRE_DETECTION INFORM]---------> Analyst
+  Analyst   --[FIRE_ANALYSIS INFORM]----------> Commander
+  RiskMonitor --[RISK_FORECAST INFORM]--------> Commander
 
-3. Evacuation Order:
-   Commander --[REQUEST: evacuate]--> Civilians (broadcast)
+Command Layer
+  Commander --[PHASE_UPDATE INFORM]-----------> Analyst
+  Commander --[WARNING / FWI_WARNING INFORM]--> Civilians (broadcast)
+  Commander --[EVACUATE REQUEST]--------------> Civilians (broadcast)
+  Commander --[REDIRECT_TO_SAFE_ZONE REQUEST]-> Civilians (broadcast)
 
-4. Rescue Coordination (Contract Net Protocol):
-   Commander --[CFP: rescue_mission]--> Rescuers (broadcast)
-   Rescuers --[PROPOSE: bid]--> Commander
-   Commander --[ACCEPT_PROPOSAL]--> Best Rescuer
-   Commander --[REJECT_PROPOSAL]--> Other Rescuers
-   Rescuer --[CONFIRM: complete]--> Commander
+Field Coordination (Contract Net Protocol)
+  Commander  --[FIRE_SUPPRESSION_CFP CFP]-----> Firefighters
+  Firefighter --[PROPOSE]------------------> Commander
+  Firefighter --[REFUSE]-------------------> Commander
+  Commander  --[ACCEPT/REJECT_PROPOSAL]-----> Firefighter
+  Firefighter --[CONFIRM]-----------------> Commander
+
+  Commander  --[RESCUE_CFP CFP]-------------> Rescuers
+  Rescuer    --[PROPOSE/REFUSE/CONFIRM]-----> Commander
+
+  Commander  --[AMBULANCE_CFP CFP]----------> Ambulances
+  Ambulance  --[PROPOSE/REFUSE/CONFIRM]-----> Commander
+
+Feedback Loops
+  Firefighter --[SUPPRESSION_UPDATE INFORM]-> Analyst
+  Civilian    --[INJURY_REPORT INFORM]------> Ambulances (direct dispatch)
+```
+
+### Message Types Reference
+
+| Performative | Used By | Purpose |
+|---|---|---|
+| INFORM | all | Share information (detections, risk reports, status updates) |
+| REQUEST | Commander | Issue orders to civilians |
+| CFP | Commander | Call For Proposal (CNP initiation) |
+| PROPOSE | Rescuer, Firefighter, Ambulance | CNP bid |
+| ACCEPT_PROPOSAL | Commander | Award mission |
+| REJECT_PROPOSAL | Commander | Reject bid |
+| REFUSE | Rescuer, Firefighter, Ambulance | Decline CFP (too dangerous / no resources) |
+| CONFIRM | Rescuer, Firefighter, Ambulance | Mission completed |
+
+### INFORM Content Types
+
+| type field | Sender -> Receiver | Description |
+|---|---|---|
+| FIRE_DETECTION | Sentinel -> Analyst | Fire location, intensity |
+| FIRE_ANALYSIS | Analyst -> Commander | TTI, ROS, risk level |
+| RISK_FORECAST | RiskMonitor -> Commander | Pre-ignition risk zones, FWI |
+| PHASE_UPDATE | Commander -> Analyst | Current phase number |
+| SUPPRESSION_UPDATE | Firefighter -> Analyst | Extinguished cell coordinates |
+| INJURY_REPORT | Civilian -> Ambulances | Smoke-injured civilian location |
+| WARNING | Commander -> Civilians | Pre-evacuation alert |
+| FWI_WARNING | Commander -> Civilians | Pre-fire weather warning |
+
+---
+
+## 4. Core Algorithms
+
+### Fire Spread (Vectorized Cellular Automaton)
+
+Each step:
+1. Compute burnout: `random < burnout_prob_grid` -> state 1 -> state 2
+2. Count burning neighbours via `scipy.signal.convolve2d` (O(WH) vs O(WH x 8) naive)
+3. For each of 8 Moore directions: compute `spread_prob = base x wind_factor x slope_factor x neighbour_factor x fuel_factor`
+4. Stochastic ignition: `random < spread_prob` -> state 3 -> state 1
+5. Update temperature grid
+6. Update smoke grid (advection-diffusion)
+
+### Smoke Diffusion (Explicit Finite Difference)
+
+Each step, operating on `smoke_grid`:
+1. Source emission from burning cells
+2. Wind advection: shift grid by wind unit vector x SMOKE_WIND_ADVECTION fraction
+3. Isotropic diffusion: 4-neighbour average x SMOKE_DIFFUSION_RATE
+4. Atmospheric decay: multiply by (1 - SMOKE_DECAY_RATE)
+
+### A* Navigation
+
+All mobile agents (Rescuer, Ambulance, Civilian) use `networkx.shortest_path(..., weight='length')` on the OSM road network graph. Path recalculation is staggered with a random per-agent offset to avoid all agents recalculating simultaneously.
+
+### Contract Net Protocol (CNP) Lifecycle
+
+```
+1. Commander detects need (fire, rescue, medical)
+2. Commander generates mission_id and broadcasts CFP to relevant group
+3. Contractors evaluate path safety and resources
+4. Qualified contractors send PROPOSE; unqualified send REFUSE
+5. Commander selects best bid (minimum cost)
+6. Commander sends ACCEPT to winner, REJECT to others
+7. Contractor executes mission
+8. Contractor sends CONFIRM on completion
+9. Commander removes mission from tracking dict
+```
+
+### Pre-Ignition Risk Assessment
+
+```
+1. FWIConnector.fetch() -> fwi_data dict
+2. FIRMSConnector.build_ignition_density() -> firms_density grid
+3. RiskMonitorAgent._recompute_risk_grid():
+   a. fwi_factor = min(fwi_score / 60, 1.0)
+   b. fuel_factor = fuel_type_grid spread_multipliers normalised
+   c. hist_factor = firms_density
+   d. slope_factor = gradient magnitude normalised
+   e. risk = 0.4*fwi + 0.3*fuel + 0.2*hist + 0.1*slope
+4. environment.ignition_risk_grid = risk
+5. Commander receives RISK_FORECAST; pre-positions firefighters
 ```
 
 ---
 
-## Core Algorithms
+## 5. Data Flow
 
-### 1. Fire Spread (Rothermel Model)
-
-```
-Rate of Spread (ROS):
-    ROS = R_base × (1 + φ_wind) × (1 + φ_slope)
-
-Wind Factor:
-    φ_wind = C × U^B × (cos(θ_difference))
-    where:
-        C = 7.47 (wind coefficient)
-        U = wind speed (m/s)
-        B = 0.785 (exponent)
-        θ_difference = angle between wind and spread direction
-
-Slope Factor:
-    φ_slope = 5.275 × (tan(slope))^2
-
-Dynamic Wind:
-    θ(t) = θ_0 + sin(t / T_period) × A_amplitude
-    Updates every step
-```
-
-### 2. Perlin Noise Terrain
+### Initialization Sequence
 
 ```
-Elevation Generation:
-    FOR each grid cell (x, y):
-        noise_value = pnoise2(
-            x / PERLIN_SCALE,
-            y / PERLIN_SCALE,
-            octaves = PERLIN_OCTAVES,
-            persistence = 0.5,
-            lacunarity = 2.0
-        )
-
-        elevation[y, x] = BASE_HEIGHT + (noise_value × AMPLITUDE)
-    END FOR
-
-Parameters:
-    - PERLIN_SCALE = 100.0 (controls feature size)
-    - PERLIN_OCTAVES = 4 (detail layers)
-    - BASE_HEIGHT = 100.0m
-    - AMPLITUDE = 50.0m
+1. LiveMapBuilder.build():
+   a. Download OSM graph (roads, buildings)
+   b. SRTM elevation download (or Perlin fallback)
+   c. CORINE land cover -> NFFL fuel_type_grid
+   d. Identify safe_nodes (OSM tags + perimeter)
+2. Load live data (parallel connectors):
+   - Open-Meteo weather -> fwi_data, wind_speed, temperature, humidity
+   - FIRMS VIIRS -> firms_density
+   - OpenAQ -> air_quality_index
+   - OSM EMS -> hospital_nodes
+3. FireSimulation.__init__() -> wind model initialised
+4. _ignite_fires() -> FIRMS/highest-elevation fuel cells
+5. _initialize_agents() -> spawn 8 agent types at OSM positions
+6. environment.fire_simulation = fire_sim  (wind access for firefighters)
 ```
 
-### 3. Safe Zone Detection (OSM)
+### Per-Step Loop
 
 ```
-Safe Zone Identification:
-    safe_nodes = {}
+Step N:
+  1. fire_sim.step():
+       - Wind direction update
+       - Burnout (vectorized)
+       - Fire spread (8-directional, vectorized)
+       - Temperature grid update
+       - Smoke grid update (advection-diffusion)
 
-    // 1. Fetch OSM features
-    FOR each tag_category, tag_values IN SAFE_ZONE_TAGS:
-        features = osm.features_from_place(
-            location,
-            tags={tag_category: tag_values}
-        )
+  2. _update_agents() — all agents in order:
+       RiskMonitors -> Sentinels -> Analyst -> Commander
+       -> Rescuers -> Firefighters -> Civilians -> Ambulances
+       Each: perceive(env) -> decide() -> act(env)
+       Clear inboxes after each group
 
-        FOR each feature IN features:
-            nearby_nodes = graph.nearest_nodes(feature.geometry)
-            safe_nodes.add(nearby_nodes)
-        END FOR
-    END FOR
+  3. _route_messages():
+       Collect all agent outboxes
+       Route by receiver string: "analyst" / "commander" / "ambulances" /
+         "firefighters" / "rescuers" / "broadcast" / direct agent_id
+       Track REFUSE count for metrics
 
-    // 2. Add map perimeter nodes
-    perimeter_nodes = get_perimeter_nodes(graph)
-    safe_nodes.update(perimeter_nodes)
+  4. _update_civilian_neighbors():
+       Each civilian: find_nearby_agents() for Social Force herding
 
-    RETURN safe_nodes
+  5. _collect_metrics():
+       casualties, evacuated, injured, panic_levels, fire stats, phase
 
-SAFE_ZONE_TAGS = {
-    'natural': ['water', 'beach', 'coastline'],
-    'leisure': ['park', 'nature_reserve', 'playground'],
-    'place': ['square']
-}
+  6. is_complete() check
 ```
 
-### 4. Greenshields Traffic Model
+### Post-Simulation
 
 ```
-Current Speed Calculation:
-    V_current = V_free_flow × (1 - ρ_local / ρ_jam)
+_print_final_report():
+  steps, phase, evacuated %, casualties %, smoke-injured,
+  burnt cells, firefighter water use, rescuer refusals,
+  avg/peak panic
 
-Where:
-    V_free_flow = 5.0 (m/s) - speed in free flow
-    ρ_jam = 10.0 (agents/area) - jam density
-    ρ_local = count_agents_nearby / area
-
-Gridlock Condition:
-    IF ρ_local ≥ ρ_jam THEN
-        V_current = 0  // Cannot move!
-    END IF
-
-Cognitive State Modifier:
-    IF state == "confused" THEN
-        V_current × 0.5  // 50% reduction
-    END IF
-```
-
-### 5. Social Force Model (Herding)
-
-```
-Herding Behavior (when panic ≥ 0.7):
-
-    // Find nearby agents within vision radius
-    nearby_agents = []
-    FOR each other_agent IN all_civilians:
-        distance = euclidean_distance(self, other_agent)
-        IF distance ≤ vision_radius THEN
-            nearby_agents.add(other_agent)
-        END IF
-    END FOR
-
-    // Calculate average movement direction
-    avg_direction = Vector2D(0, 0)
-    FOR each agent IN nearby_agents:
-        IF agent.last_movement EXISTS THEN
-            avg_direction += agent.last_movement
-        END IF
-    END FOR
-
-    avg_direction = normalize(avg_direction)
-
-    // Apply herding force
-    movement = avg_direction × V_current × HERDING_INFLUENCE
-
-    // Update position
-    new_position = position + movement
-
-    // Store movement for others to follow
-    last_movement = new_position - position
+get_results() -> dict for CSV export (batch mode)
 ```
 
 ---
 
-## Data Flow
-
-### Simulation Loop
-
-```
-INITIALIZATION:
-    1. Build environment from OSM (roads, buildings, forests)
-    2. Generate Perlin noise terrain
-    3. Identify safe zones (OSM + perimeter)
-    4. Initialize 5 agent types
-    5. Ignite random fires
-
-MAIN LOOP (each step):
-    1. UPDATE FIRE:
-        - Calculate dynamic wind direction
-        - Spread fire using Rothermel model
-        - Update fire grid
-
-    2. UPDATE AGENTS (in order):
-        a. Sentinels:
-            perceive() → detect fire with attenuation
-            decide() → check debouncing threshold
-            act() → send fire alerts
-
-        b. Analyst:
-            perceive() → collect fire reports
-            decide() → calculate ROS, TTI, risk
-            act() → send risk report to commander
-
-        c. Commander:
-            perceive() → receive risk reports
-            decide() → calculate ECT, determine phase, evaluate proposals
-            act() → broadcast orders, dispatch rescuers
-
-        d. Rescuers:
-            perceive() → receive CFPs, mission status
-            decide() → assess path risk, calculate bid
-            act() → send proposals, execute missions
-
-        e. Civilians:
-            perceive() → check fire visibility, messages
-            decide() → update panic, determine cognitive state
-            act() → move based on state (rational/confused/herding)
-
-    3. ROUTE MESSAGES:
-        - Collect all outbox messages from agents
-        - Route to recipients (direct or broadcast)
-        - Deliver to inboxes
-        - Clear outboxes
-
-    4. UPDATE CIVILIAN NEIGHBORS:
-        - For civilians in "herding" state:
-            find_nearby_agents() for Social Force calculation
-
-    5. COLLECT METRICS:
-        - Count casualties (civilians in fire)
-        - Count evacuated (civilians at safe zones)
-        - Track panic levels
-        - Track active fires
-        - Record commander phase
-
-    6. CHECK TERMINATION:
-        - Fire burnt out? (no burning cells AND no fuel)
-        - All evacuated? (active civilians == evacuated)
-        - Max steps reached?
-
-        IF complete THEN BREAK
-
-POST-SIMULATION:
-    - Calculate final statistics
-    - Export to CSV (if batch mode)
-    - Display dashboard (if GUI mode)
-```
-
-### Agent Update Cycle (Universal Pattern)
-
-```
-FOR each agent:
-    perceive(environment):
-        - Read sensor data
-        - Check messages inbox
-        - Update internal state
-
-    decide():
-        - Process perceptions
-        - Apply agent-specific logic
-        - Plan actions
-
-    act(environment):
-        - Execute planned actions
-        - Send messages
-        - Update position
-        - Modify environment
-
-    clear_messages():
-        - Empty inbox after processing
-```
-
----
-
-## Key Design Decisions
-
-### 1. Why 5 Different Agent Architectures?
-
-**Educational Purpose**: Demonstrates heterogeneous multi-agent systems where agents with different architectures collaborate. Shows that:
-- Simple reactive agents (Sentinel) can coexist with complex deliberative agents (Civilian)
-- No single architecture is "best" - each fits specific roles
-- Coordination emerges from communication, not centralized control
-
-### 2. Why ECT vs TTI Logic?
-
-**Real-World Basis**: Based on the 2018 Mati fire disaster where evacuation was ordered too late, causing traffic gridlock. People died in cars or ran to the beach.
-
-**Key Insight**: If evacuation takes longer than time until fire arrives → DON'T EVACUATE, go to nearest safe zone (water, park, open space).
-
-### 3. Why 3 Cognitive States for Civilians?
-
-**Psychological Realism**: Research shows panic affects decision-making quality:
-- **Rational**: Normal state, optimal decisions
-- **Confused**: Moderate panic, degraded performance (50% speed, hesitation)
-- **Herding**: High panic, follows crowd even to dangerous areas (documented in disasters)
-
-### 4. Why Location-Agnostic?
-
-**Generalizability**: Original version only worked in one hardcoded location. Now works anywhere:
-- Perlin noise replaces hardcoded terrain
-- OSM tags identify safe zones universally
-- No "east coastline" assumptions
-
-### 5. Why Monte Carlo Mode?
-
-**Research Validation**: Single runs don't prove anything. Need statistical confidence:
-- Run 100+ simulations
-- Get mean ± standard deviation
-- Compare strategies with statistical significance
-- Publish results in academic papers
-
----
-
-## Performance Considerations
+## 6. Performance
 
 ### Computational Complexity
 
-| Component | Time Complexity (Before) | Time Complexity (After) | Optimization |
-|-----------|-------------------------|------------------------|--------------|
-| Fire Spread | O(N_burning × 8) | O(W × H) vectorized | scipy.convolve2d |
-| Sentinel Sensing | O(N_sentinels × W × H) | O(N_sentinels × R²) | Spatial hashing |
-| Agent Pathfinding | O(N_agents × E log V) | O(N_agents × E log V / 20) | Staggered recalc |
-| Herding | O(N_civilians × R²) | O(N_civilians × R²) | Limited vision |
-| Message Routing | O(N_messages) | O(N_messages) | Direct routing |
+| Component | Complexity | Optimization |
+|-----------|------------|--------------|
+| Fire spread | O(W x H) | scipy.convolve2d replaces 8 nested loops |
+| Smoke diffusion | O(W x H) | Vectorized numpy array operations |
+| Sentinel sensing | O(R^2) per sentinel | Bounding box + circular check |
+| Agent pathfinding | O(E log V / N_steps) | Staggered recalc every 20 steps |
+| CNP bid evaluation | O(N_proposals) | Evaluated once per phase step |
+| Civilian herding | O(N_civ x R^2) | Limited vision radius = 10 cells |
 
-Where: W,H = grid dimensions, R = vision/detection radius, E,V = graph edges/vertices
+W, H = grid dimensions; R = detection radius; E, V = OSM graph edges/vertices
 
-### Implemented Optimizations
+### Key Optimizations
 
-1. **Vectorized Fire Spread** (`fire_simulation.py`):
-   - Uses `scipy.signal.convolve2d` for neighbor counting
-   - Eliminates nested for loops over grid cells
-   - Processes all 8 spread directions with numpy array operations
-   - **Impact**: 10-50× speedup on fire propagation
+**Vectorized fire spread**: `scipy.signal.convolve2d` counts burning neighbours for all cells simultaneously. All 8 spread directions processed with array slicing — no Python loops over cells.
 
-2. **Spatial Hashing for Sensors** (`sentinel.py`):
-   - Bounding box + circular check (O(R²) vs O(N²))
-   - Only scans within detection_radius = 30 cells
-   - Skips cells outside circular boundary immediately
-   - **Impact**: 99% reduction in sensor computation
+**Staggered pathfinding**: each agent carries a `recalc_offset` drawn at init from `[0, path_recalc_interval)`. Paths recalculated only every 20 steps, offset so agents never all recalculate in the same step.
 
-3. **Staggered Pathfinding** (`civilian.py`, `rescuer.py`):
-   - Agents recalculate paths only every N=20 steps
-   - Random offset (0 to N-1) prevents simultaneous recalculation
-   - Immediate recalc on fire blockage (dynamic re-routing)
-   - **Impact**: 95% reduction in pathfinding overhead
+**Claimed fire cells**: `environment.claimed_fire_cells` set prevents multiple firefighters targeting the same burning cell in the same step. Reset each step.
 
-4. **Additional Optimizations**:
-   - Limited vision radius (R=10 for civilians, R=30 for sentinels)
-   - Periodic Commander re-evaluation (every 10 steps)
-   - Headless mode for batch experiments
-   - OSM data caching for repeated runs
-
----
-
-## Extension Points
-
-### Easy Extensions (Configuration Changes)
-
-1. **More Agents**: Increase `NUM_CIVILIANS`, `NUM_RESCUERS` in config
-2. **Larger Maps**: Increase `MAP_RADIUS`, `GRID_SIZE`
-3. **Different Locations**: Change `MAP_CENTER_LAT`, `MAP_CENTER_LON`
-4. **Fire Parameters**: Adjust `FIRE_SPREAD_PROBABILITY`, wind parameters
-
-### Medium Extensions (Code Modifications)
-
-1. **Multiple Fires**: Modify `ignite_random_fires()` to start N fires
-2. **Agent Learning**: Add Q-learning to Rescuer pathfinding
-3. **Dynamic Obstacles**: Road closures from fire damage
-4. **Communication Delays**: Add network latency to message routing
-
-### Hard Extensions (Architecture Changes)
-
-1. **3D Visualization**: Replace matplotlib with Unity/Unreal
-2. **Real-Time Data**: Integrate live weather APIs
-3. **Human-in-the-Loop**: Allow user to control Commander
-4. **Distributed Simulation**: Run agents on separate processes/machines
+**Message routing by string**: `_route_messages()` dispatches in O(1) for named groups (analyst, commander, ambulances, firefighters, rescuers, broadcast) before falling back to linear scan for direct agent IDs.
 
 ---
 
 ## Summary
 
-AIGIS demonstrates a complete Multi-Agent System with:
-- ✅ **5 Different Architectures**: Reactive, Model-Based, Hybrid, Goal-Based, BDI
-- ✅ **Physics-Based Models**: Rothermel fire, Greenshields traffic, Social Force herding
-- ✅ **Real-World Grounding**: ECT vs TTI from actual disasters
-- ✅ **Location-Agnostic**: Works globally via OSM
-- ✅ **Research-Ready**: Monte Carlo with statistical analysis
-
-**Core Philosophy**: "The right architecture for the right role, coordinated through communication."
+| Agent | Architecture | Primary Protocol | Key Model |
+|-------|-------------|-----------------|-----------|
+| Sentinel | Reactive | — (INFORM output) | Green & Swets 1966 SDT |
+| Analyst | BDI | — (INFORM output) | Rothermel 1972 TTI |
+| Commander | BDI + Hybrid | CNP Manager | Wolshon 2006 ECT |
+| RiskMonitor | Model-Based BDI | — (INFORM output) | Van Wagner 1987 FWI |
+| Firefighter | BDI + Utility | CNP Contractor | Rothermel 1972 fire-line |
+| Rescuer | BDI | CNP Contractor | — |
+| Ambulance | BDI | CNP Contractor + direct | Inness 2019 smoke injury |
+| Civilian | BDI | — (receives orders) | Greenshields 1935 + Inness 2019 |

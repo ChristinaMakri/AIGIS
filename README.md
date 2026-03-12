@@ -1,107 +1,121 @@
 # AIGIS: AI for Guardian & Intervention Systems
 
-A sophisticated Multi-Agent System (MAS) for disaster management simulation, focusing on wildfire response and evacuation scenarios.
+A Multi-Agent System (MAS) for wildfire disaster management simulation. AIGIS creates a Digital Twin of any geographic area using live OpenStreetMap data and simulates the interaction between 8 distinct types of intelligent agents under crisis conditions.
 
-## Overview
+**Location-Agnostic**: AIGIS works anywhere in the world. Provide latitude/longitude coordinates and it builds the environment from real data.
 
-AIGIS creates a "Digital Twin" of any geographic area using live OpenStreetMap data and simulates the interaction between 5 distinct types of intelligent agents under crisis conditions. The system demonstrates how different Agent Architectures (Reactive, Model-based, BDI, Hybrid) collaborate in a stochastic, partially observable environment.
-
-**Location-Agnostic**: AIGIS works anywhere in the world - just provide latitude/longitude coordinates.
+---
 
 ## Key Features
 
-### 🌍 Location-Agnostic System
-- **Real SRTM Elevation**: Uses NASA's Shuttle Radar Topography Mission data (~30m resolution)
-- **Perlin Noise Fallback**: Generates realistic terrain when real data unavailable
-- **OSM Safe Zone Detection**: Automatically identifies water bodies, parks, squares, and map edges
-- **Universal Deployment**: Works at any location globally
+### Location-Agnostic Environment
+- Real SRTM elevation data (NASA Shuttle Radar Topography Mission, ~30 m resolution)
+- Perlin noise terrain fallback when real elevation is unavailable
+- OSM safe zone detection: water bodies, parks, squares, and map perimeter edges
+- CORINE land cover integration for realistic NFFL fuel model assignment
 
-### 🔥 Physics-Based Fire Simulation
-- **Rothermel Fire Model**: Scientific fire spread with fuel, wind, and slope effects
-- **Dynamic Wind**: Oscillating wind direction: θ(t) = θ₀ + sin(t/50) × 20°
-- **Cellular Automata**: 4-state fire grid (No Fuel, Burning, Burnt, Fuel)
+### Physics-Based Fire Simulation
+- Rothermel (1972) fire spread: `ROS = R_base x (1 + phi_wind) x (1 + phi_slope)`
+- Dynamic wind oscillation: `theta(t) = theta_0 + sin(t/T) x A`
+- 4-state cellular automaton: No Fuel / Burning / Burnt / Fuel
+- 13 NFFL fuel models (Anderson 1982) with per-type spread rate and burnout probability
+- Advection-diffusion smoke plume (Inness et al. 2019 — CAMS)
 
-### 👥 Multi-Agent System
-- **5 Agent Types**: Sentinel, Analyst, Commander, Rescuer, Civilian
-- **FIPA-ACL Communication**: Standards-compliant agent messaging
-- **Contract Net Protocol**: Task allocation between Commander and Rescuers
+### Multi-Agent System (8 Agent Types)
+- FIPA-ACL standards-compliant messaging
+- Contract Net Protocol (Smith 1980) for task allocation
+- BDI architecture (Rao & Georgeff 1995) as the foundation for most agents
+- Layered communication topology: Sensing -> Analysis -> Command -> Field
 
-### 🧠 Crowd Dynamics
-- **Greenshields Traffic Model**: Speed = V_free × (1 - ρ/ρ_jam) → Realistic gridlock
-- **Social Force Model**: Herding behavior at high panic levels
-- **3-State Cognitive Machine**: Rational → Confused → Herding
+### Crowd and Evacuation Dynamics
+- Greenshields (1935) traffic model: `V = V_free x (1 - rho/rho_jam)` — realistic gridlock
+- Social Force herding model at high panic
+- 3-state cognitive machine: Rational -> Confused -> Herding
+- Cumulative smoke exposure injury model
 
-### 📊 Professional Dashboard
-- **3-Panel Layout**: Main map + 2 real-time line charts
-- **Safe Zone Highlighting**: Visual indicators for evacuation destinations
-- **Panic Visualization**: Civilians colored by panic level (colormap)
-- **Live Metrics**: Casualties and evacuations tracked over time
+### Canadian Fire Weather Index (FWI)
+- Pre-ignition risk grid: FWI (40%) + fuel type (30%) + FIRMS density (20%) + slope (10%)
+- Van Wagner (1987) FWI chain: FFMC -> DMC -> DC -> ISI -> BUI -> FWI
+- Commander pre-positions assets to high-risk zones before fire starts
 
-### 🧪 Monte Carlo Batch Mode
-- **Research-Ready**: Run hundreds of experiments with single command
-- **CSV Export**: Pandas DataFrame with all metrics
-- **Statistical Analysis**: Mean ± std, min/max ranges automatically calculated
+### Real Data Integration
+- Open-Meteo: live temperature, humidity, wind
+- NASA FIRMS VIIRS: historical ignition density (Schroeder et al. 2014)
+- OpenAQ: air quality index (PM2.5 proxy for smoke)
+- OSM EMS connector: hospital and ambulance station nodes
 
-### 🤖 Machine Learning & Real Data Integration
-- **Historical Fire Data**: Real wildfire incidents from NIFC (2010-2018)
-- **Real Population Data**: OpenStreetMap building footprints and density estimation
-- **Live Weather API**: Real-time weather from Open-Meteo (temperature, wind, humidity)
-- **Real Elevation Data**: SRTM terrain data from Open-Elevation API (replaces Perlin noise)
-- **ML Predictions**: XGBoost and Random Forest models for casualty and evacuation forecasting
-- **Data-Driven Decisions**: Commander agent enhanced with historical pattern matching
+### Post-Simulation Report
+Printed automatically after each run:
+- Evacuation rate, casualty rate, smoke-injured count
+- Burnt area, firefighter water use, rescuer refusals
+- Average and peak panic levels
+
+### Monte Carlo Batch Mode
+- Run hundreds of experiments with a single command
+- CSV export with all metrics
+- Mean, std, min, max printed to console
+
+---
 
 ## Agent Types
 
-### 1. Sentinel Agent (Reactive Architecture)
-- **Role**: Fire detection sensors with environmental attenuation
-- **Logic**: Signal Detection Theory with distance and wind-based attenuation
-- **Features**:
-  - Signal equation: `I_detected = I_actual/(d² + ε) × (1 + cos(θ)) + N(0,σ)`
-  - Debouncing protocol (3 consecutive detections required)
-  - Wind-aware smoke drift simulation
+### 1. Sentinel (Reactive — Signal Detection Theory)
+Distributed fire sensors placed at map corners. Detects fire via attenuated signal:
+```
+I_detected = [I_actual / (d^2 + epsilon)] x (1 + cos(theta)) + N(0, sigma)
+```
+Three consecutive detections required before alerting Analyst (debouncing).
 
-### 2. Analyst Agent (Model-Based / Deductive)
-- **Role**: Risk assessment using Rothermel fire physics
-- **Logic**: Simplified Rothermel's Surface Fire Spread Model + Fuzzy Logic
-- **Features**:
-  - Rate of Spread (ROS): `ROS = R_base × (1 + φ_wind) × (1 + φ_slope)`
-  - Time To Impact (TTI): `TTI = Distance / ROS`
-  - Escape route bottleneck detection
-  - Fuzzy rules based on TTI and exit availability
+### 2. Analyst (BDI — Information Processing)
+Reads fire reports from Sentinels. Computes Rate of Spread and Time To Impact using Rothermel (1972):
+```
+ROS = R_base x (1 + phi_wind) x (1 + phi_slope)
+TTI = distance_to_population / ROS
+```
+Applies 20% TTI conservatism in Phase 2+. Filters already-suppressed cells from reports. Reports risk to Commander.
 
-### 3. Commander Agent (Hybrid / Utility-Based)
-- **Role**: Strategic decision making using ECT vs TTI comparison
-- **Logic**: Evacuation Clearance Time (ECT) calculation and phase-based protocol
-- **Features**:
-  - ECT calculation: `ECT = (N_agents / C_exit) × γ`
-  - 4-Phase Decision Protocol:
-    - **Phase 0**: Monitoring (TTI > 2.5×ECT)
-    - **Phase 1**: Pre-Evacuation Warning (1.5×ECT < TTI ≤ 2.5×ECT)
-    - **Phase 2**: Mass Evacuation (1.0×ECT < TTI ≤ 1.5×ECT)
-    - **Phase 3**: **Shelter-in-Place** (TTI ≤ ECT) - Redirect to nearest safe zone
-  - Dynamic safe zone routing (water, parks, map edges)
+### 3. Commander (BDI + Hybrid — ECT vs TTI)
+Compares Evacuation Clearance Time against Time To Impact to select one of four phases:
 
-### 4. Rescuer Agent (Goal-Based / Practical Reasoning)
-- **Role**: Execute rescue missions with risk assessment
-- **Logic**: Contract Net Protocol with path risk evaluation
-- **Features**:
-  - Path risk assessment: Scans temperature grid along route
-  - Risk-adjusted bidding: `Cost = time + (Risk_path × α) + fuel`
-  - Safety protocol: **Refuses missions through active fire**
-  - A* pathfinding for navigation
+| Phase | Condition | Action |
+|-------|-----------|--------|
+| 0: Monitoring | TTI > 2.5 x ECT | Standby |
+| 1: Pre-Alert | 1.5 x ECT < TTI <= 2.5 x ECT | WARNING to civilians; dispatch firefighters |
+| 2: Mass Evacuation | 1.0 x ECT < TTI <= 1.5 x ECT | EVACUATE order; dispatch rescuers, ambulances, firefighters |
+| 3: Shelter-in-Place | TTI <= ECT | REDIRECT to nearest safe zone |
 
-### 5. Civilian Agent (BDI Architecture)
-- **Role**: Evacuate with realistic traffic physics and panic psychology
-- **Architecture**: BDI with Greenshields' Traffic Model + 3-State Cognitive Machine
-- **Features**:
-  - **Traffic Model**: `V = V_free × (1 - ρ_local/ρ_jam)` → Gridlock at jam density
-  - **Cognitive States**:
-    - Rational (Panic < 0.4): Optimal A* pathfinding to nearest safe zone
-    - Confused (0.4-0.7): 50% speed reduction, frequent re-routing
-    - Herding (> 0.7): Follows crowd (Social Force), even to dead ends
-  - **Panic Equation**: `Panic(t) = Panic(t-1) + α×(1/d_fire) + β×(family)`
-  - Distance-based panic with family separation factor
-  - Dynamic safe zone detection (parks, water, map edges)
+Receives pre-fire RISK_FORECAST from RiskMonitor to pre-position assets. Coordinates all field units via CNP.
+
+### 4. RiskMonitor (Model-Based BDI — Pre-Ignition Risk)
+Runs before fire starts. Builds an ignition risk grid from four components:
+```
+risk = 0.40 x fwi_factor + 0.30 x fuel_factor + 0.20 x firms_factor + 0.10 x slope_factor
+```
+Sends top-3 high-risk zones to Commander as RISK_FORECAST messages.
+
+### 5. Firefighter (BDI + Utility — Suppression)
+CNP contractor for fire suppression. Three strategies evaluated by utility function:
+- water_drop: 80% success rate, consumes 500 gal
+- fire_line: removes fuel perpendicular to wind direction (Rothermel 1972)
+- backburn: controlled pre-burn ahead of fire front
+
+On successful suppression: sends SUPPRESSION_UPDATE to Analyst (removes cell from TTI calculation) and CONFIRM to Commander.
+
+### 6. Rescuer (BDI — Goal-Based CNP Contractor)
+Bids on rescue missions from Commander. Path risk evaluated against temperature grid. Refuses missions through active fire. Executes A* navigation to target, recalculates on fire blockage.
+
+### 7. Ambulance (BDI — Two-Phase Goal Stack)
+Two-leg mission: scene -> hospital. Dispatched via Commander AMBULANCE_CFP or directly by civilian INJURY_REPORT (smoke incapacitation bypass). Refuses paths through fire above safety threshold.
+
+### 8. Civilian (BDI — Three-State Cognitive Machine)
+Most complex agent. Accumulates smoke exposure from smoke_grid each step:
+- When `smoke_exposure >= CIVILIAN_INJURY_THRESHOLD`: becomes injured, freezes, sends INJURY_REPORT to ambulances
+- Panic equation: `Panic(t) = Panic(t-1) + alpha x (1/d_fire) + beta x (family_separated) - decay`
+- Smoke contributes additional panic: `panic += smoke_conc x CIVILIAN_SMOKE_PANIC_SCALE`
+- AQI (PM2.5) reduces movement speed
+- 3 cognitive states drive movement strategy
+
+---
 
 ## Installation
 
@@ -114,234 +128,161 @@ AIGIS creates a "Digital Twin" of any geographic area using live OpenStreetMap d
 pip install -r requirements.txt
 ```
 
-Required packages:
-- numpy: Numerical operations
-- scipy: Signal processing and convolution
-- pandas: Data analysis and CSV export
-- osmnx: OpenStreetMap integration
-- networkx: Graph-based pathfinding
-- matplotlib: Visualization and dashboard
-- scikit-fuzzy: Fuzzy logic for analyst
-- shapely: Geometric operations
-- rasterio: Geospatial raster data
-- geopandas: Geospatial data frames
-- noise: Perlin noise terrain generation
-- pytest: Unit testing framework
+Required packages: numpy, scipy, pandas, osmnx, networkx, matplotlib, scikit-fuzzy, shapely, rasterio, geopandas, noise, requests, pytest
+
+---
 
 ## Usage
 
-### CLI Arguments
+### CLI
 
 ```bash
 python main.py [OPTIONS]
 ```
 
-**Options:**
-- `--lat LAT` : Center latitude (default: 38.04)
-- `--lon LON` : Center longitude (default: 23.80)
-- `--radius RADIUS` : Map radius in meters (default: 2000)
-- `--batch N` : Run N Monte Carlo experiments (batch mode)
-- `--output FILE` : CSV output file for batch mode (default: results.csv)
-- `--mode {gui,headless}` : Visualization mode (default: gui)
+| Option | Default | Description |
+|--------|---------|-------------|
+| `--lat` | 38.04 | Center latitude |
+| `--lon` | 23.80 | Center longitude |
+| `--radius` | 2000 | Map radius in meters |
+| `--batch N` | — | Run N Monte Carlo experiments |
+| `--output FILE` | results.csv | CSV output for batch mode |
+| `--mode {gui,headless}` | gui | Visualization mode |
 
 ### Examples
 
-#### 1. Quick Start (Default Location)
 ```bash
+# Default location (Athens)
 python main.py
-```
-Runs single simulation with live dashboard at Athens, Greece (example location).
 
-#### 2. Custom Location (Los Angeles)
-```bash
+# Custom location
 python main.py --lat 34.0522 --lon -118.2437 --radius 2500
-```
-Runs simulation in Los Angeles with 2.5km radius.
 
-#### 3. Monte Carlo Experiment (50 runs)
-```bash
+# 50-run Monte Carlo experiment
 python main.py --batch 50 --output results.csv
-```
-Runs 50 simulations at default location, exports metrics to CSV.
 
-#### 4. Research Experiment (California Forest)
-```bash
-python main.py --lat 36.7783 --lon -119.4179 --radius 3000 --batch 100 --output ca_forest.csv
-```
-Runs 100 simulations in California forest region for statistical analysis.
-
-#### 5. HPC Cluster Mode (Headless)
-```bash
+# Headless batch for HPC
 python main.py --batch 1000 --mode headless --output hpc_results.csv
 ```
-Runs 1000 simulations without GUI for high-performance computing environments.
 
-### Machine Learning Setup (Optional)
-
-To enable ML predictions with real historical data:
+### Optional: ML and Real Data Setup
 
 ```bash
-# 1. Collect historical fire data (NIFC 2010-2018)
-python collect_fire_data.py
-
-# 2. Collect real population data (OpenStreetMap)
-python get_population_data.py
-
-# 3. Fetch current weather conditions (Open-Meteo API)
-python fetch_real_weather.py
-
-# 4. Fetch real elevation data (SRTM via Open-Elevation API)
-python fetch_real_elevation.py
-
-# 5. Train ML models (XGBoost + Random Forest)
-python train_models.py
-
-# 6. Run simulation (automatically uses trained models and real data)
-python main.py
+python collect_fire_data.py       # NIFC historical fire data
+python get_population_data.py     # OSM building density
+python fetch_real_weather.py      # Open-Meteo live weather
+python fetch_real_elevation.py    # SRTM elevation
+python train_models.py            # XGBoost + Random Forest
+python main.py                    # Uses trained models automatically
 ```
 
-**What it does:**
-- Trains 4 ML models: Casualty Risk, Evacuation Count, Containment Time, Financial Cost
-- Commander agent gets ML predictions every 10 steps: `🤖 ML Predictions: Risk=HIGH, Casualties=12.1`
-- Combines physics-based (Rothermel) + data-driven (ML) decision making
+---
 
-**Data sources:**
-- Historical fires: National Interagency Fire Center (NIFC)
-- Population: OpenStreetMap building footprints
-- Weather: Open-Meteo API (free, no API key)
-- Elevation: SRTM via Open-Elevation API (free, ~30m resolution)
-
-### Docker Deployment
-
-```bash
-# Build and run with docker-compose
-docker-compose up --build
-
-# Or use the run script
-./docker-run.sh
-```
-
-See [DOCKER.md](DOCKER.md) for detailed Docker instructions.
-
-## Architecture
+## File Structure
 
 ```
 AIGIS/
-├── main.py                    # CLI entry point with argparse
-├── requirements.txt           # Python dependencies
-├── README.md                  # This file
-├── PHYSICS_MODELS.md         # Scientific model documentation
-├── Dockerfile                # Docker configuration
-├── docker-compose.yml        # Docker Compose setup
-├── collect_fire_data.py      # Historical fire data collection (NIFC API)
-├── get_population_data.py    # Real population from OpenStreetMap
-├── fetch_real_weather.py     # Live weather from Open-Meteo API
-├── fetch_real_elevation.py   # Real elevation data from SRTM
-├── train_models.py           # ML model training pipeline
+├── main.py                        # CLI entry point
+├── requirements.txt
+├── README.md
+├── PHYSICS_MODELS.md              # Scientific model documentation
+├── ARCHITECTURE.md                # System design and agent logic
+├── DOCKER.md
 └── src/
-    ├── config.py             # Configuration constants
-    ├── message.py            # FIPA-ACL message implementation
-    ├── environment.py        # LiveMapBuilder with SRTM or Perlin terrain
-    ├── fire_simulation.py    # Fire model with dynamic wind
-    ├── simulation.py         # Main simulation engine with metrics
-    ├── dashboard.py          # 3-panel professional dashboard
-    ├── ml_predictor.py       # ML prediction integration module
+    ├── config.py                  # All parameters in one place
+    ├── message.py                 # FIPA-ACL message class
+    ├── environment.py             # LiveMapBuilder, smoke_grid, SRTM
+    ├── fire_simulation.py         # Rothermel spread + smoke diffusion
+    ├── simulation.py              # Main engine, metrics, final report
+    ├── dashboard.py               # 3-panel GUI dashboard
+    ├── ml_predictor.py            # XGBoost prediction module
+    ├── parameter_adapter.py       # Monte Carlo parameter learning
+    ├── data_connectors/
+    │   ├── fwi_connector.py       # Open-Meteo FWI data
+    │   ├── firms_connector.py     # NASA FIRMS ignition density
+    │   ├── airquality_connector.py  # OpenAQ PM2.5 / AQI
+    │   └── ems_connector.py       # OSM hospital node lookup
     └── agents/
-        ├── base_agent.py     # Abstract base agent
-        ├── sentinel.py       # Reactive agent (Signal Detection)
-        ├── analyst.py        # Model-based agent (Rothermel + Fuzzy)
-        ├── commander.py      # Hybrid agent (ECT vs TTI + ML)
-        ├── rescuer.py        # Goal-based agent (Contract Net)
-        └── civilian.py       # BDI agent (Greenshields + Social Force)
+        ├── base_agent.py          # Abstract BDI base (perceive/decide/act)
+        ├── sentinel.py            # Reactive — Signal Detection Theory
+        ├── analyst.py             # BDI — Rothermel TTI + phase feedback
+        ├── commander.py           # BDI + Hybrid — ECT/TTI + CNP Manager
+        ├── risk_monitor.py        # Model-Based — pre-ignition FWI risk
+        ├── firefighter.py         # BDI + Utility — water/fire-line/backburn
+        ├── rescuer.py             # BDI — CNP Contractor, A* pathfinding
+        ├── ambulance.py           # BDI — two-phase medical extraction
+        └── civilian.py            # BDI — crowd dynamics, smoke injury
 ```
+
+---
 
 ## Configuration
 
-Edit `src/config.py` to customize:
+All parameters are in `src/config.py`. Key groups:
 
-### Location Parameters
+### Location
 ```python
-DEFAULT_MAP_CENTER_LAT = 38.04   # Default: Athens, Greece (example)
+DEFAULT_MAP_CENTER_LAT = 38.04
 DEFAULT_MAP_CENTER_LON = 23.80
-DEFAULT_MAP_RADIUS = 2000        # meters
-GRID_HEIGHT = 100
-GRID_WIDTH = 100
+DEFAULT_MAP_RADIUS = 2000   # metres
+GRID_HEIGHT = 200
+GRID_WIDTH = 200
 ```
 
-### Agent Population
+### Agent Counts
 ```python
-NUM_SENTINELS = 4           # Fire detection sensors
-NUM_RESCUERS = 3            # Rescue teams
-NUM_CIVILIANS = 20          # Evacuees
+NUM_SENTINELS = 4
+NUM_RESCUERS = 3
+NUM_FIREFIGHTERS = 3
+NUM_CIVILIANS = 20
+NUM_AMBULANCES = 2
+NUM_RISK_MONITORS = 1
 ```
 
-### Fire Parameters
+### Fire Physics
 ```python
-WIND_INITIAL_DIRECTION = 90.0      # degrees
-WIND_OSCILLATION_PERIOD = 50.0     # steps
-WIND_OSCILLATION_AMPLITUDE = 20.0  # degrees
-FIRE_SPREAD_PROBABILITY = 0.4
+WIND_INITIAL_DIRECTION = 90.0
+WIND_OSCILLATION_PERIOD = 50.0
+WIND_OSCILLATION_AMPLITUDE = 20.0
+FIRE_SPREAD_PROB_BASE = 0.4
+ROTHERMEL_BASE_ROS = 0.5
 ```
 
-### Perlin Terrain
+### Smoke Model
 ```python
-PERLIN_SCALE = 100.0
-PERLIN_OCTAVES = 4
-PERLIN_BASE_HEIGHT = 100.0
-PERLIN_AMPLITUDE = 50.0
+SMOKE_SOURCE_STRENGTH = 0.30
+SMOKE_DIFFUSION_RATE = 0.08
+SMOKE_DECAY_RATE = 0.05
+SMOKE_WIND_ADVECTION = 0.40
 ```
 
-### Safe Zone Detection (OSM Tags)
+### Civilian Injury
 ```python
-SAFE_ZONE_TAGS = {
-    'natural': ['water', 'beach', 'coastline'],
-    'leisure': ['park', 'nature_reserve', 'playground'],
-    'place': ['square']
-}
+CIVILIAN_INJURY_THRESHOLD = 5.0
+CIVILIAN_SMOKE_PANIC_SCALE = 0.02
 ```
 
-## Scientific Models
+---
 
-### 1. Fire Spread (Rothermel Model)
-```
-ROS = R_base × (1 + φ_wind) × (1 + φ_slope)
-φ_wind = C × U^B × (direction_alignment)
-φ_slope = 5.275 × (tan(slope))^2
-```
+## Scientific Models (Summary)
 
-### 2. Dynamic Wind Model
-```
-θ(t) = θ₀ + sin(t / T_period) × A_amplitude
-Updates every simulation step
-```
+| Model | Equation | Reference |
+|-------|----------|-----------|
+| Fire Spread | `ROS = R_base x (1+phi_wind) x (1+phi_slope)` | Rothermel (1972) |
+| Wind Factor | `phi_wind = C x U^B` | Rothermel (1972) |
+| Slope Factor | `phi_slope = 5.275 x tan^2(theta)` | Rothermel (1972) |
+| Smoke Diffusion | `dC/dt = -U.grad(C) + D.lap(C) + S` | Inness et al. (2019) |
+| Traffic Flow | `V = V_free x (1 - rho/rho_jam)` | Greenshields et al. (1935) |
+| Panic | `P(t) = P(t-1) + alpha/d + beta*family - decay` | Cova & Johnson (2002) |
+| Fire Detection | `I_det = I/(d^2+e) x (1+cos(theta)) + N(0,sigma)` | Green & Swets (1966) |
+| FWI | FFMC -> DMC -> DC -> ISI -> BUI -> FWI | Van Wagner (1987) |
+| ECT | `ECT = (N / C_exit) x gamma` | Wolshon (2006) |
 
-### 3. Traffic Model (Greenshields)
-```
-V_current = V_free_flow × (1 - ρ_local / ρ_jam)
-When ρ_local ≥ ρ_jam → Gridlock (V = 0)
-```
-
-### 4. Panic Equation
-```
-Panic(t) = Panic(t-1) + α × (1/d_fire) + β × (Family_Separated?)
-Decays when fire not visible
-```
-
-### 5. Social Force Model (Herding)
-```
-Movement = Σ(nearby_agents.direction) / N
-Applied when Panic ≥ 0.7
-```
-
-### 6. ECT vs TTI Decision Logic
-```
-ECT = (N_agents / C_exit) × γ_congestion
-Phase = f(TTI / ECT ratio)
-```
+---
 
 ## Monte Carlo Output
 
-When running with `--batch N`, AIGIS exports a CSV file with these columns:
+CSV columns exported with `--batch N`:
 
 | Column | Description |
 |--------|-------------|
@@ -349,86 +290,56 @@ When running with `--batch N`, AIGIS exports a CSV file with these columns:
 | `lat`, `lon`, `radius` | Location parameters |
 | `steps` | Simulation duration |
 | `total_civilians` | Population size |
-| `casualties` | Number of deaths |
+| `casualties` | Deaths from fire or smoke |
 | `evacuated` | Successful evacuations |
-| `mortality_rate` | Death rate (0.0-1.0) |
-| `evacuation_success_rate` | Success rate (0.0-1.0) |
-| `avg_panic_level` | Mean panic level |
+| `injured` | Smoke-incapacitated civilians |
+| `mortality_rate` | Death rate 0.0–1.0 |
+| `evacuation_success_rate` | Success rate 0.0–1.0 |
+| `avg_panic_level` | Mean panic across all steps |
 | `max_panic_level` | Peak panic observed |
-| `rescuer_refusals` | Refused missions |
-| `max_fire_cells` | Peak fire intensity |
-| `final_phase` | Commander's final phase (0-3) |
+| `rescuer_refusals` | Refused missions (path blocked) |
+| `max_fire_cells` | Peak simultaneous burning cells |
+| `final_phase` | Commander final phase (0–3) |
 
-Statistical summary (mean ± std, ranges) is printed to console.
+---
 
-## Visualization
+## Docker
 
-### Dashboard Layout (GUI Mode)
-- **Left Panel**: Main map with fire grid, safe zones, and agents
-- **Top-Right Panel**: Casualties over time (red line chart)
-- **Bottom-Right Panel**: Successful evacuations (green line chart)
+```bash
+docker-compose up --build
+# or
+./docker-run.sh
+```
 
-### Legend
-- 🟢 Green: Fuel (forest/vegetation)
-- 🟠 Orange: Actively burning
-- ⚫ Dark Gray: Burnt out
-- 🟢 Light Green Glow: Safe zones (water, parks, edges)
-- 🟡 Gold Circle: Sentinel
-- 🟣 Purple Square: Analyst
-- 🔴 Red Triangle: Commander
-- 🔵 Blue Diamond: Rescuer
-- 🌈 Color-coded Dots: Civilians (green=calm → red=panic)
+See [DOCKER.md](DOCKER.md) for details.
 
-## Performance Optimizations
-
-AIGIS implements several performance optimizations for large-scale simulations:
-
-### Staggered Pathfinding
-- Agents recalculate paths only on initialization, fire blockage, or every N=20 steps
-- Random offset prevents all agents from recalculating simultaneously
-- Reduces pathfinding overhead by 95%
-
-### Spatial Hashing for Sensors
-- Sentinel sensors use bounding box + circular check (O(R²) vs O(N²))
-- Only scans within detection radius instead of entire grid
-- Reduces sensor computation by 99% on 200×200 grids
-
-### Vectorized Fire Spread
-- Uses `scipy.signal.convolve2d` for cellular automata
-- Eliminates all for loops, processes entire grid in parallel
-- 10-50× faster than naive implementation
-
-### Performance Scaling
-- **Grid size**: Smaller grids (100×100) run faster than large grids (200×200)
-- **Map radius**: Affects OSM data fetching time (~2-5 seconds)
-- **Agent count**: Linear scaling up to ~50 agents
-- **Headless mode**: Faster for batch experiments (no rendering overhead)
-
-## Research Applications
-
-AIGIS is designed for:
-- Testing evacuation strategies
-- Comparing agent architectures
-- Analyzing panic psychology effects
-- Validating traffic flow models
-- Studying fire-evacuation scenarios
-- Monte Carlo sensitivity analysis
+---
 
 ## Documentation
 
-- [ARCHITECTURE.md](ARCHITECTURE.md) - Complete system architecture and business logic
-- [PHYSICS_MODELS.md](PHYSICS_MODELS.md) - Detailed scientific model documentation
-- [DOCKER.md](DOCKER.md) - Docker deployment guide
+- [ARCHITECTURE.md](ARCHITECTURE.md) — Complete agent logic, communication flows, data pipeline
+- [PHYSICS_MODELS.md](PHYSICS_MODELS.md) — All scientific models with equations and references
+- [DOCKER.md](DOCKER.md) — Docker deployment guide
 
-## Future Extensions
+---
 
-- Multiple simultaneous fires
-- Dynamic obstacle creation (road closures)
-- Agent learning and adaptation
-- 3D terrain visualization
-- Network communication delays
-- Resource constraints (fuel, supplies)
-- Historical scenario playback
+## Full Bibliography
+
+1. Rothermel, R.C. (1972). *A Mathematical Model for Predicting Fire Spread in Wildland Fuels*. USDA Forest Service Research Paper INT-115.
+2. Anderson, H.E. (1982). *Aids to Determining Fuel Models for Estimating Fire Behavior*. USDA Forest Service GTR INT-122.
+3. Van Wagner, C.E. (1987). *Development and Structure of the Canadian Forest Fire Weather Index System*. Forestry Technical Report 35.
+4. Van Wagner, C.E. & Pickett, T.L. (1985). *Equations and FORTRAN Program for the Canadian Forest Fire Weather Index System*. Forestry Technical Report 33.
+5. Schroeder, W. et al. (2014). "The New VIIRS 375 m active fire detection data product." *Remote Sensing of Environment*, 143, pp. 85–96.
+6. Inness, A. et al. (2019). "The CAMS reanalysis of atmospheric composition." *Atmos. Chem. Phys.*, 19(6), pp. 3515–3556.
+7. Green, D.M. & Swets, J.A. (1966). *Signal Detection Theory and Psychophysics*. Wiley.
+8. Rao, A.S. & Georgeff, M.P. (1995). "BDI agents: From theory to practice." *ICMAS-95*, pp. 312–319.
+9. Smith, R.G. (1980). "The Contract Net Protocol." *IEEE Trans. Computers*, C-29(12), pp. 1104–1113.
+10. Greenshields, B.D. et al. (1935). "A study of traffic capacity." *Highway Research Board Proceedings*, 14, pp. 448–477.
+11. Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of neighborhood evacuations in the urban-wildland interface." *Environment and Planning A*, 34(12), pp. 2211–2230.
+12. Wolshon, B. (2006). "Evacuation planning and engineering for Hurricane Katrina." *The Bridge*, 36(1), pp. 27–34.
+13. Lagouvardos, K. et al. (2019). "Meteorological analysis of the catastrophic wildfire in Mati, eastern Attica, Greece." *BAMS*, 100(11), pp. 2243–2257.
+
+---
 
 ## License
 
@@ -436,10 +347,9 @@ MIT License
 
 ## Citation
 
-If you use AIGIS in your research, please cite:
+If you use AIGIS in your research:
 ```
 AIGIS: AI for Guardian & Intervention Systems
 Multi-Agent Wildfire Evacuation Simulation
 https://github.com/ChristinaMakri/AIGIS
 ```
-
