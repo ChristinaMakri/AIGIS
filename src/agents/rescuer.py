@@ -2,6 +2,17 @@
 Rescuer Agent - Goal-Based / Practical Reasoning Architecture
 Executes rescue missions using Contract Net Protocol with risk-adjusted bidding
 Implements safety protocol to refuse dangerous missions
+
+Contract Net Protocol (CNP) implemented here:
+  Smith, R.G. (1980).
+  "The Contract Net Protocol: High-level communication and control in a
+  distributed problem solver."
+  IEEE Transactions on Computers, C-29(12), pp. 1104–1113.
+  https://doi.org/10.1109/TC.1980.1675516
+
+  The CNP CFP → PROPOSE → ACCEPT/REJECT message cycle used in
+  _handle_cfp() / _handle_mission_assignment() maps directly to
+  Smith's orignal manager–contractor interaction model.
 """
 import numpy as np
 import networkx as nx
@@ -19,14 +30,57 @@ from ..config import (
 
 class RescuerAgent(Agent):
     """
-    Goal-based agent that responds to rescue missions.
+    ═══════════════════════════════════════════════════════════════════════
+    AGENT:        Rescuer
+    ARCHITECTURE: BDI — Practical Reasoning with Risk Assessment
+                  CNP Contractor role (Smith 1980)
+    ───────────────────────────────────────────────────────────────────────
+    BELIEFS
+      • current_mission     active mission dict {mission_id, target, commander}
+      • current_path        planned A* route (list of graph node IDs)
+      • current_node        current road-network node
+      • mission_status      IDLE | MOVING | ARRIVED | ABORTED
+      • fuel                remaining resource level (0–100)
+      • risk_alpha          risk-penalty weight in bid cost function
+      • safety_threshold    maximum tolerable path temperature (°C)
 
-    Architecture: Practical Reasoning with Risk Assessment
-    - Participates in Contract Net Protocol as bidder
-    - Assesses path risk by scanning fire/temperature grid
-    - Uses A* pathfinding for navigation
-    - Refuses missions through active fire (safety protocol)
-    - Manages resources (fuel)
+    DESIRES
+      • Complete rescue missions and bring civilians to safety
+      • Preserve own safety (refuse missions through active fire)
+      • Manage fuel resources responsibly
+
+    INTENTIONS
+      Idle:    listen for CFPs; assess path risk; bid if safe
+      Moving:  follow A* path; re-route periodically; abort if blocked
+      Arrived: notify Commander of mission completion; return to IDLE
+      Bid:     Cost = (distance/speed) + (risk × α) + (100 − fuel)
+
+    COMMUNICATION
+      SENDS
+        → PROPOSE   commander  {cost,eta,path_risk,target,civilian_id}
+              CNP bid in response to CFP
+        → REFUSE    commander  {reason}
+              reject CFP (dangerous/busy/no fuel/no path)
+        → REFUSE    commander  {reason,mission_id}
+              abort active mission (path blocked by fire)
+        → CONFIRM   commander  {mission_id,status}
+              mission completed successfully
+      RECEIVES
+        ← CFP            commander  {target_location,civilian_id,priority}
+        ← ACCEPT_PROPOSAL commander  {mission_id,target}
+        ← REJECT_PROPOSAL commander  {}
+
+    BIBLIOGRAPHY
+      [1] Smith, R.G. (1980). "The Contract Net Protocol: High-level
+          communication and control in a distributed problem solver."
+          IEEE Trans. Computers, C-29(12), pp. 1104–1113.
+          DOI: 10.1109/TC.1980.1675516
+      [2] Rao, A.S. & Georgeff, M.P. (1995). "BDI agents: From theory to
+          practice." ICMAS-95, pp. 312–319. AAAI Press.
+      [3] Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of
+          neighborhood evacuations in the urban-wildland interface."
+          Environment and Planning A, 34(12), pp. 2211–2229.
+    ═══════════════════════════════════════════════════════════════════════
     """
 
     def __init__(self, agent_id: str, position: Tuple[float, float],
@@ -52,6 +106,10 @@ class RescuerAgent(Agent):
         - Risk_path: Maximum temperature along planned path
         - α: Risk penalty weight (higher α = more risk-averse)
         - 100 - Fuel: Fuel penalty (low fuel = higher cost)
+
+        Ref — Contract Net Protocol:
+        Smith, R.G. (1980). "The Contract Net Protocol."
+        IEEE Transactions on Computers, C-29(12), pp. 1104–1113.
 
         Args:
             agent_id: Unique identifier
@@ -240,7 +298,7 @@ class RescuerAgent(Agent):
                 self.send_message(refuse_msg)
                 return
 
-            # Send proposal
+            # Send proposal (include civilian_id so Commander can track targeted civilians)
             proposal = Message(
                 sender=self.agent_id,
                 receiver=message.sender,
@@ -249,7 +307,8 @@ class RescuerAgent(Agent):
                     'cost': total_cost,
                     'eta': eta,
                     'path_risk': path_risk,
-                    'target': target_location
+                    'target': target_location,
+                    'civilian_id': message.content.get('civilian_id'),
                 },
                 conversation_id=message.conversation_id
             )

@@ -9,25 +9,75 @@ Architecture: Utility-Based Agent with Resource Management
 - Coordinates with other firefighters
 """
 import numpy as np
-from typing import Tuple, List, Optional
+from typing import Tuple, List, Optional, Dict
 from .base_agent import Agent
 from ..message import Message
 
 
 class FirefighterAgent(Agent):
     """
-    Utility-based firefighting agent that actively suppresses fires.
+    ═══════════════════════════════════════════════════════════════════════
+    AGENT:        Firefighter
+    ARCHITECTURE: BDI — Utility-Based Intention Selection
+                  CNP Contractor role (Smith 1980)
+    ───────────────────────────────────────────────────────────────────────
+    BELIEFS
+      • target_fire         (row,col) of assigned or self-found burning cell
+      • suppression_strategy  chosen action: water_drop | fire_line |
+                              backburn | patrol | refill | return_to_base
+      • current_water       remaining water (gallons; 0–5000)
+      • is_refilling        currently at base refilling
+      • current_mission     active CNP mission {mission_id, target_grid}
+      • mission_status      IDLE | ASSIGNED | SUPPRESSING
 
-    Actions:
-    1. Water Drop - Extinguish burning cells
-    2. Create Fire Line - Remove fuel in fire's path
-    3. Backburn - Controlled burn to remove fuel
-    4. Monitor - Watch fire behavior for strategy adjustment
+    DESIRES
+      • Suppress active fires to reduce spread and TTI
+      • Manage water resources efficiently
+      • Accept only missions that can be completed (resource check)
 
-    Resource Management:
-    - Water capacity: 5000 gallons
-    - Refill time: 10 steps
-    - Drop effectiveness: 80% chance to extinguish
+    INTENTIONS  (utility-based intention selection — decide())
+      Utility = w_threat × Threat + w_efficiency × Efficiency
+                + w_coordination × Coordination
+      Best strategy selected each step; then executed in act().
+
+      water_drop:    extinguish target cell (probabilistic 80% success)
+      fire_line:     remove fuel ahead of spread direction
+      backburn:      controlled pre-burn to create barrier
+      patrol:        monitor when no target available
+      refill:        recharge at base (10 steps)
+
+    COMMUNICATION
+      SENDS
+        → PROPOSE   commander  {cost,eta,path_risk,target,target_grid}
+              CNP bid in response to FIRE_SUPPRESSION_CFP
+        → REFUSE    commander  {reason}
+              reject CFP (refilling / no water)
+        → CONFIRM   commander  {mission_id, status:'COMPLETED'}
+              suppression mission completed
+        → INFORM    analyst    {type:'SUPPRESSION_UPDATE', row, col}
+              notify Analyst that cell (row,col) was extinguished so it
+              drops that fire_report and recomputes TTI correctly
+      RECEIVES
+        ← CFP             commander  {type:'FIRE_SUPPRESSION_CFP',
+                                       target_location, target_grid,
+                                       mission_id, priority}
+        ← ACCEPT_PROPOSAL commander  {mission_id, target_grid}
+        ← REJECT_PROPOSAL commander  {mission_id}
+
+    BIBLIOGRAPHY
+      [1] Rothermel, R.C. (1972). A Mathematical Model for Predicting Fire
+          Spread in Wildland Fuels. USDA Forest Service Research Paper INT-115.
+          Fire spread direction informs fire_line placement strategy.
+      [2] Anderson, H.E. (1982). Aids to Determining Fuel Models.
+          USDA Forest Service GTR INT-122.
+          Fuel type affects water-drop and fire-line effectiveness.
+      [3] Smith, R.G. (1980). "The Contract Net Protocol."
+          IEEE Trans. Computers, C-29(12), pp. 1104–1113.
+          CFP → PROPOSE → ACCEPT/REJECT → CONFIRM cycle.
+      [4] Rao, A.S. & Georgeff, M.P. (1995). "BDI agents: From theory to
+          practice." ICMAS-95, pp. 312–319. AAAI Press.
+          Utility function embedded in BDI intention-selection step.
+    ═══════════════════════════════════════════════════════════════════════
     """
 
     def __init__(self, agent_id: str, position: Tuple[float, float]):
@@ -62,6 +112,12 @@ class FirefighterAgent(Agent):
         self.target_fire = None  # (row, col) of target fire cell
         self.suppression_strategy = None  # 'water', 'fire_line', 'backburn'
 
+        # === CNP MISSION TRACKING ===
+        # mission_status: IDLE = no assignment; ASSIGNED = accepted CFP, moving to act;
+        #                 SUPPRESSING = actively executing suppression
+        self.current_mission: Optional[dict] = None  # {mission_id, target_grid, commander}
+        self.mission_status: str = "IDLE"
+
     def perceive(self, environment) -> None:
         """
         Perceive fire state and coordinate with other firefighters.
@@ -76,29 +132,50 @@ class FirefighterAgent(Agent):
         burning_cells = np.argwhere(environment.fire_grid == 1)
 
         if len(burning_cells) > 0:
-            # Find closest burning cell
+            claimed = getattr(environment, 'claimed_fire_cells', set())
+
+            # Prefer unclaimed cells; fall back to any cell if all are claimed
+            available = [tuple(c) for c in burning_cells if tuple(c) not in claimed]
+            candidates = available if available else [tuple(c) for c in burning_cells]
+
             distances = [
                 np.linalg.norm(np.array(self.grid_position) - np.array(cell))
-                for cell in burning_cells
+                for cell in candidates
             ]
             closest_idx = np.argmin(distances)
-            self.target_fire = tuple(burning_cells[closest_idx])
+            self.target_fire = candidates[closest_idx]
 
-        # Check messages for coordination
+            # Claim this cell so the next firefighter skips it
+            claimed.add(self.target_fire)
+            environment.claimed_fire_cells = claimed
+
+        # Check messages for coordination (Contract Net Protocol)
         for message in self.messages_inbox:
             if message.performative == "CFP":
                 # Commander is requesting a firefighting mission.
-                # Respond with PROPOSE if available, REFUSE if not.
+                # Only respond to FIRE_SUPPRESSION_CFP; ignore other CFP types.
+                if message.content.get('type') != 'FIRE_SUPPRESSION_CFP':
+                    continue
                 if not self.is_refilling and self.current_water >= self.water_per_drop:
+                    target_grid = message.content.get('target_grid')
+                    # Compute distance-based cost: closer fires are cheaper to suppress
+                    if self.grid_position and target_grid:
+                        dist = np.linalg.norm(
+                            np.array(self.grid_position) - np.array(target_grid)
+                        )
+                    else:
+                        dist = 0.0
+                    cost = dist + (self.water_capacity - self.current_water) * 0.01
                     propose = Message(
                         sender=self.agent_id,
                         receiver=message.sender,
                         performative="PROPOSE",
                         content={
-                            'cost': 1.0,
-                            'eta': 1,
+                            'cost': cost,
+                            'eta': max(1, int(dist)),
                             'path_risk': 0.0,
-                            'target': message.content.get('target_location')
+                            'target': message.content.get('target_location'),
+                            'target_grid': target_grid,
                         },
                         conversation_id=message.conversation_id
                     )
@@ -113,6 +190,24 @@ class FirefighterAgent(Agent):
                         conversation_id=message.conversation_id
                     )
                     self.send_message(refuse)
+
+            elif message.performative == "ACCEPT_PROPOSAL":
+                # Commander accepted our bid — store mission and override target
+                self.current_mission = {
+                    'mission_id': message.content.get('mission_id'),
+                    'target_grid': message.content.get('target_grid'),
+                    'commander': message.sender,
+                }
+                target_grid = message.content.get('target_grid')
+                if target_grid:
+                    self.target_fire = tuple(target_grid)
+                self.mission_status = "ASSIGNED"
+
+            elif message.performative == "REJECT_PROPOSAL":
+                # Commander chose another unit — stay idle
+                if self.mission_status == "ASSIGNED":
+                    self.mission_status = "IDLE"
+                    self.current_mission = None
 
     def decide(self) -> None:
         """
@@ -243,6 +338,38 @@ class FirefighterAgent(Agent):
                 environment.temperature_grid[row, col] = 50.0  # Cooling
                 print(f"  💦 {self.agent_id}: Extinguished fire at ({row}, {col}) "
                       f"[Water: {self.current_water}/{self.water_capacity}]")
+
+                # ── SUPPRESSION_UPDATE → Analyst ─────────────────────────────
+                # Notify Analyst so it removes this cell from active fire_reports
+                # and recomputes TTI without counting an already-dead fire.
+                suppression_msg = Message(
+                    sender=self.agent_id,
+                    receiver="analyst",
+                    performative="INFORM",
+                    content={
+                        'type': 'SUPPRESSION_UPDATE',
+                        'row': int(row),
+                        'col': int(col),
+                        'timestamp': environment.step_count,
+                    }
+                )
+                self.send_message(suppression_msg)
+
+                # ── CONFIRM → Commander (CNP mission complete) ────────────────
+                if self.current_mission:
+                    confirm_msg = Message(
+                        sender=self.agent_id,
+                        receiver=self.current_mission['commander'],
+                        performative="CONFIRM",
+                        content={
+                            'mission_id': self.current_mission['mission_id'],
+                            'status': 'COMPLETED',
+                        }
+                    )
+                    self.send_message(confirm_msg)
+                    self.current_mission = None
+                    self.mission_status = "IDLE"
+
             else:
                 # Reduced intensity but not extinguished
                 print(f"  💦 {self.agent_id}: Reduced fire intensity at ({row}, {col})")
@@ -251,20 +378,59 @@ class FirefighterAgent(Agent):
             self.target_fire = None
 
     def _execute_fire_line(self, environment) -> None:
-        """Create fire line by removing fuel"""
+        """
+        Create fire line by removing fuel perpendicular to the wind direction.
+
+        Rothermel (1972) shows fire spreads fastest along the wind vector.
+        An effective fire line must be placed perpendicular to that vector,
+        ahead of the fire front (1-3 cells downwind of the target cell), so
+        the advancing front runs into a fuel gap it cannot cross.
+
+        Reference:
+          Rothermel, R.C. (1972). A Mathematical Model for Predicting Fire
+          Spread in Wildland Fuels. USDA Forest Service Research Paper INT-115.
+          Wind-aligned spread direction informs optimal fire-line orientation.
+        """
         if self.target_fire is None:
             return
 
         fire_row, fire_col = self.target_fire
 
-        # Create fire line perpendicular to fire direction
-        # Simplified: remove fuel in a line near the fire
-        for offset in range(-self.fire_line_width, self.fire_line_width + 1):
-            new_row = fire_row + offset
-            if 0 <= new_row < environment.grid_shape[0]:
-                if environment.fire_grid[new_row, fire_col] == 3:  # Fuel
-                    environment.fire_grid[new_row, fire_col] = 0  # No fuel
-                    print(f"  🪓 {self.agent_id}: Created fire line at ({new_row}, {fire_col})")
+        # Retrieve wind direction from the fire simulation (unit vector [dx, dy])
+        wind_vec = None
+        fire_sim = getattr(environment, 'fire_simulation', None)
+        if fire_sim is not None:
+            wind_vec = getattr(fire_sim, 'wind_direction', None)
+
+        if wind_vec is not None and np.linalg.norm(wind_vec) > 1e-6:
+            # Perpendicular to wind: rotate 90 degrees
+            # wind = [dx, dy] → perp = [-dy, dx]
+            wind_dx, wind_dy = wind_vec[0], wind_vec[1]
+            perp_dr = int(round(-wind_dx))  # row offset perpendicular to wind
+            perp_dc = int(round(wind_dy))   # col offset perpendicular to wind
+
+            # Place line 2 cells downwind of the fire (ahead of spread direction)
+            anchor_row = int(np.clip(fire_row + int(round(wind_dy * 2)),
+                                     0, environment.grid_shape[0] - 1))
+            anchor_col = int(np.clip(fire_col + int(round(wind_dx * 2)),
+                                     0, environment.grid_shape[1] - 1))
+
+            for offset in range(-self.fire_line_width, self.fire_line_width + 1):
+                nr = int(np.clip(anchor_row + perp_dr * offset,
+                                 0, environment.grid_shape[0] - 1))
+                nc = int(np.clip(anchor_col + perp_dc * offset,
+                                 0, environment.grid_shape[1] - 1))
+                if environment.fire_grid[nr, nc] == 3:  # Fuel
+                    environment.fire_grid[nr, nc] = 0   # Remove fuel
+                    print(f"  [{self.agent_id}]: fire line (wind-perp) at ({nr}, {nc})")
+        else:
+            # Fallback: axis-aligned line when wind data unavailable
+            for offset in range(-self.fire_line_width, self.fire_line_width + 1):
+                new_row = int(np.clip(fire_row + offset,
+                                      0, environment.grid_shape[0] - 1))
+                if environment.fire_grid[new_row, fire_col] == 3:
+                    environment.fire_grid[new_row, fire_col] = 0
+                    print(f"  [{self.agent_id}]: fire line at ({new_row}, {fire_col})")
 
         self.target_fire = None
 

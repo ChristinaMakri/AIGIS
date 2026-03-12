@@ -2,6 +2,23 @@
 Fire Spreading Model with Dynamic Wind
 Implements Rothermel-based spread with wind direction that changes over time
 Uses vectorized operations with scipy.signal.convolve2d for performance
+
+Rothermel fire spread model — core physics implemented in
+_calculate_directional_spread_vectorized() and _calculate_slope_factor_vectorized():
+  Rothermel, R.C. (1972).
+  A Mathematical Model for Predicting Fire Spread in Wildland Fuels.
+  USDA Forest Service Research Paper INT-115.
+  Intermountain Forest and Range Experiment Station, Ogden, UT.
+
+  Spread equation:  ROS = R_base × (1 + φ_wind) × (1 + φ_slope) × fuel_factor
+  Wind factor:      φ_wind  = C × U^B            (Rothermel eq. 47)
+  Slope factor:     φ_slope = 5.275 × tan²(θ)    (Rothermel eq. 51)
+
+NFFL fuel model classifications for fuel_type_factor:
+  Anderson, H.E. (1982).
+  Aids to Determining Fuel Models for Estimating Fire Behavior.
+  USDA Forest Service General Technical Report INT-122.
+  Intermountain Forest and Range Experiment Station, Ogden, UT.
 """
 import numpy as np
 from scipy import signal
@@ -21,7 +38,11 @@ from .config import (
     FIRE_TEMP_BURNING,
     FIRE_TEMP_COOLING_RATE,
     FIRE_TEMP_AMBIENT,
-    WIND_LOG_INTERVAL
+    WIND_LOG_INTERVAL,
+    SMOKE_SOURCE_STRENGTH,
+    SMOKE_DIFFUSION_RATE,
+    SMOKE_DECAY_RATE,
+    SMOKE_WIND_ADVECTION,
 )
 
 
@@ -289,6 +310,9 @@ class FireSimulation:
         # Temperature affects Sentinel detection and Rescuer risk assessment
         self._update_temperature_grid()
 
+        # Update smoke grid — advection-diffusion plume (Inness et al. 2019)
+        self._update_smoke_grid()
+
     # NOTE: Legacy non-vectorized methods removed.
     # The vectorized implementation using scipy.signal.convolve2d (in step() method)
     # replaced these methods for ~100x performance improvement on large grids.
@@ -363,7 +387,7 @@ class FireSimulation:
             # Only increase probability for wind-aligned spread (max(0, ...))
             wind_factor = 1.0 + phi_wind * max(0, wind_alignment)
         else:
-            wind_factor = 1.0  # No movement direction (shouldn't happen)
+            wind_factor = 1.0  # spread_mag == 0 cannot happen for 8-directional Moore neighbours
 
         # ===== STEP 4: SLOPE FACTOR (ROTHERMEL) =====
         # Fire spreads faster uphill due to heat rising and flame angle
@@ -500,6 +524,60 @@ class FireSimulation:
 
         # No fuel cells (water, roads) have ambient temperature
         temp_grid[fire_grid == 0] = FIRE_TEMP_AMBIENT
+
+    def _update_smoke_grid(self) -> None:
+        """
+        Simplified advection–diffusion smoke plume model.
+
+        Physics:  ∂C/∂t = −U·∇C  +  D·∇²C  +  S
+          C  = smoke concentration [0–1 normalised]
+          U  = wind vector (from Rothermel dynamic-wind model)
+          D  = isotropic diffusion coefficient (SMOKE_DIFFUSION_RATE)
+          S  = source term: burning cells emit SMOKE_SOURCE_STRENGTH per step
+
+        Implemented as an explicit finite-difference step:
+          1. Source: add emission from all burning cells
+          2. Advection: shift concentration downwind by SMOKE_WIND_ADVECTION
+          3. Diffusion: average with 4-neighbours × SMOKE_DIFFUSION_RATE
+          4. Decay: multiply by (1 − SMOKE_DECAY_RATE) each step
+
+        Reference:
+          Inness, A. et al. (2019). "The CAMS reanalysis of atmospheric
+          composition." Atmos. Chem. Phys., 19(6), pp. 3515–3556.
+          DOI: 10.5194/acp-19-3515-2019
+        """
+        smoke = self.environment.smoke_grid.copy()
+        fire_grid = self.environment.fire_grid
+
+        # ---- 1. Source -------------------------------------------------------
+        smoke[fire_grid == 1] += SMOKE_SOURCE_STRENGTH
+
+        # ---- 2. Wind advection (shift grid in downwind direction) ------------
+        # wind_direction is a unit vector [dx, dy]; shift rows/cols accordingly
+        wind_dx, wind_dy = self.wind_direction  # dx = East, dy = South
+        shift_r = int(round(wind_dy))           # row shift (South positive)
+        shift_c = int(round(wind_dx))           # col shift (East positive)
+        if shift_r != 0 or shift_c != 0:
+            advected = np.zeros_like(smoke)
+            r_src = slice(max(0, -shift_r), smoke.shape[0] + min(0, -shift_r))
+            r_tgt = slice(max(0,  shift_r), smoke.shape[0] + min(0,  shift_r))
+            c_src = slice(max(0, -shift_c), smoke.shape[1] + min(0, -shift_c))
+            c_tgt = slice(max(0,  shift_c), smoke.shape[1] + min(0,  shift_c))
+            advected[r_tgt, c_tgt] = smoke[r_src, c_src]
+            smoke = smoke * (1.0 - SMOKE_WIND_ADVECTION) + advected * SMOKE_WIND_ADVECTION
+
+        # ---- 3. Isotropic diffusion (4-neighbour average) --------------------
+        padded = np.pad(smoke, 1, mode='edge')
+        neighbour_avg = (
+            padded[:-2, 1:-1] + padded[2:, 1:-1] +
+            padded[1:-1, :-2] + padded[1:-1, 2:]
+        ) / 4.0
+        smoke = smoke + SMOKE_DIFFUSION_RATE * (neighbour_avg - smoke)
+
+        # ---- 4. Atmospheric decay -------------------------------------------
+        smoke *= (1.0 - SMOKE_DECAY_RATE)
+
+        self.environment.smoke_grid = np.clip(smoke, 0.0, 1.0).astype(np.float32)
 
     def get_fire_statistics(self) -> dict:
         """Get current fire statistics"""

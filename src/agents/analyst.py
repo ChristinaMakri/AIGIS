@@ -1,7 +1,20 @@
 """
-Analyst Agent - Model-Based / Deductive Architecture
+Analyst Agent — BDI / Information Processing Architecture
 Uses Rothermel's Fire Spread Model + Fuzzy Logic for risk assessment
 Implements Time To Impact (TTI) and escape route analysis
+
+Rothermel fire-spread model (Rate of Spread):
+  Rothermel, R.C. (1972).
+  "A mathematical model for predicting fire spread in wildland fuels."
+  USDA Forest Service Research Paper INT-RP-115. Ogden, UT.
+  Formula: ROS = R_base × (1 + φ_wind) × (1 + φ_slope)
+           φ_wind = C × U^B     (wind factor)
+           φ_slope = 5.275 × tan²(φ)  (slope factor)
+
+NFFL Fuel Models used for fuel-type classification:
+  Anderson, H.E. (1982).
+  "Aids to determining fuel models for estimating fire behavior."
+  USDA Forest Service General Technical Report INT-GTR-122.
 """
 import numpy as np
 import skfuzzy as fuzz
@@ -33,13 +46,56 @@ except ImportError:
 
 class AnalystAgent(Agent):
     """
-    Model-based agent that performs risk assessment using Rothermel + Fuzzy Logic.
+    ═══════════════════════════════════════════════════════════════════════
+    AGENT:        Analyst
+    ARCHITECTURE: BDI — Information Processing with Physics Models
+    ───────────────────────────────────────────────────────────────────────
+    BELIEFS
+      • fire_reports        raw detections from Sentinels [{lat,lon,intensity}]
+      • risk_assessments    (lat,lon) → fuzzy risk level 0–100
+      • tti_value           Time To Impact (seconds until fire reaches assets)
+      • ros_value           Rate of Spread (m/s, Rothermel model)
+      • current_phase       Commander's current evacuation phase (0–3)
+                            received via PHASE_UPDATE → adjusts TTI thresholds
+      • suppressed_cells    set of (row,col) cells recently extinguished by
+                            Firefighters (received via SUPPRESSION_UPDATE)
 
-    Architecture: Deductive Reasoning
-    - Calculates Rate of Spread (ROS) using Rothermel's model
-    - Computes Time To Impact (TTI)
-    - Assesses escape route availability
-    - Uses fuzzy inference for final risk calculation
+    DESIRES
+      • Provide accurate, timely risk intelligence to Commander
+      • Compute TTI conservatively when evacuation is underway (Phase ≥ 2)
+
+    INTENTIONS
+      1. Aggregate Sentinel FIRE_DETECTION reports each step
+      2. Drop any fire_report for a cell in suppressed_cells (already out)
+      3. Apply Rothermel model → ROS; compute TTI = distance / ROS
+      4. If Phase ≥ 2: apply 20% TTI reduction (more conservative estimate)
+      5. Run fuzzy inference (TTI × route availability → risk 0–100)
+      6. Send RISK_REPORT to Commander
+
+    COMMUNICATION
+      SENDS
+        → INFORM  commander  {type:'RISK_REPORT', max_risk, avg_risk,
+                              tti, ros, num_exits, fire_locations, timestamp}
+      RECEIVES
+        ← INFORM  sentinel    {type:'FIRE_DETECTION', lat, lon, intensity}
+        ← INFORM  commander   {type:'PHASE_UPDATE', phase}
+              belief update: adjust TTI conservatism for active evacuation
+        ← INFORM  firefighter {type:'SUPPRESSION_UPDATE', row, col}
+              belief update: remove extinguished cell from active fire reports
+
+    BIBLIOGRAPHY
+      [1] Rothermel, R.C. (1972). A Mathematical Model for Predicting Fire
+          Spread in Wildland Fuels. USDA Forest Service Research Paper
+          INT-115. Intermountain Forest and Range Experiment Station, UT.
+          ROS = R_base × (1+φ_wind) × (1+φ_slope)
+      [2] Anderson, H.E. (1982). Aids to Determining Fuel Models for
+          Estimating Fire Behavior. USDA Forest Service GTR INT-122.
+          Fuel classifications for slope/ROS context.
+      [3] Rao, A.S. & Georgeff, M.P. (1995). "BDI agents: From theory to
+          practice." ICMAS-95, pp. 312–319. AAAI Press.
+          Intention revision: phase & suppression updates modify beliefs
+          before each TTI computation cycle.
+    ═══════════════════════════════════════════════════════════════════════
     """
 
     def __init__(self, agent_id: str, position: Tuple[float, float]):
@@ -73,6 +129,15 @@ class AnalystAgent(Agent):
         # ===== KEY METRICS =====
         self.tti_value = float('inf')  # Time To Impact (how long until fire reaches civilians)
         self.ros_value = 0.0  # Rate of Spread (m/s, from Rothermel model)
+
+        # ===== BDI BELIEF UPDATES FROM OTHER AGENTS =====
+        # PHASE_UPDATE from Commander: used to apply conservative TTI margin
+        # when evacuation is already underway (Phase ≥ 2).
+        self.current_phase: int = 0
+
+        # SUPPRESSION_UPDATE from Firefighters: cells recently extinguished;
+        # fire_reports for these cells are dropped before TTI computation.
+        self.suppressed_cells: set = set()
 
         # ===== STEP-AHEAD FIRE PREDICTOR =====
         self.step_ahead_predictor = None
@@ -166,11 +231,20 @@ class AnalystAgent(Agent):
 
     def _calculate_ros(self, slope: float, wind_speed: float) -> float:
         """
-        Calculate Rate of Spread using simplified Rothermel equation.
+        Calculate Rate of Spread using the simplified Rothermel (1972) equation.
 
-        ROS = R_base * (1 + phi_wind) * (1 + phi_slope)
-        phi_slope = 5.275 * (tan(φ))^2
-        phi_wind = C * U^B
+        ROS = R_base × (1 + φ_wind) × (1 + φ_slope)
+
+        Wind factor:  φ_wind  = C × U^B
+        Slope factor: φ_slope = 5.275 × tan²(φ)
+
+        Where:
+          R_base — base ROS for the fuel type (m/s)
+          U      — wind speed (m/s)
+          φ      — slope angle (radians, converted from % grade)
+          C, B   — empirical wind coefficients
+
+        Ref: Rothermel, R.C. (1972). USDA Forest Service Research Paper INT-RP-115.
 
         Returns: Rate of spread in m/s
         """
@@ -200,11 +274,32 @@ class AnalystAgent(Agent):
         return distance_to_settlement / ros
 
     def perceive(self, environment) -> None:
-        """Collect fire detection reports from Sentinels"""
+        """
+        Collect fire detection reports from Sentinels and belief updates
+        from Commander (PHASE_UPDATE) and Firefighters (SUPPRESSION_UPDATE).
+        """
         self._environment = environment
         for message in self.messages_inbox:
-            if message.performative == "INFORM" and message.content.get('type') == 'FIRE_DETECTION':
+            msg_type = message.content.get('type') if message.content else None
+
+            # ── Raw sensor data from Sentinels ──────────────────────────────
+            if message.performative == "INFORM" and msg_type == 'FIRE_DETECTION':
                 self.fire_reports.append(message.content)
+
+            # ── Belief update: Commander phase transition ────────────────────
+            # When evacuation is underway (Phase ≥ 2) we apply a conservative
+            # TTI multiplier so the Commander isn't falsely reassured.
+            elif message.performative == "INFORM" and msg_type == 'PHASE_UPDATE':
+                self.current_phase = int(message.content.get('phase', 0))
+
+            # ── Belief update: Firefighter suppression success ───────────────
+            # Remove extinguished cells from active fire reports so TTI is not
+            # inflated by fires that are already out.
+            elif message.performative == "INFORM" and msg_type == 'SUPPRESSION_UPDATE':
+                row = message.content.get('row')
+                col = message.content.get('col')
+                if row is not None and col is not None:
+                    self.suppressed_cells.add((int(row), int(col)))
 
     def decide(self) -> None:
         """
@@ -212,7 +307,19 @@ class AnalystAgent(Agent):
         Apply fuzzy logic for final risk assessment.
         """
         environment = self._environment
+        if environment is None:
+            return
         self.risk_assessments.clear()
+
+        # Drop reports for cells already extinguished by Firefighters.
+        # Belief revision: suppressed_cells is populated by SUPPRESSION_UPDATE.
+        if self.suppressed_cells:
+            self.fire_reports = [
+                r for r in self.fire_reports
+                if environment.latlon_to_grid(r['lat'], r['lon'])
+                not in self.suppressed_cells
+            ]
+            self.suppressed_cells.clear()
 
         if not self.fire_reports:
             self.tti_value = float('inf')
@@ -253,9 +360,10 @@ class AnalystAgent(Agent):
             radius = getattr(environment, 'radius', 2000.0)
             cell_h = (2.0 * radius) / environment.elevation_grid.shape[0]
             cell_w = (2.0 * radius) / environment.elevation_grid.shape[1]
-            dz_row = float(np.max(np.abs(np.diff(patch, axis=0)))) / cell_h
-            dz_col = float(np.max(np.abs(np.diff(patch, axis=1)))) / cell_w
-            slope_percentage = (dz_row + dz_col) * 100.0
+            dz_row = float(np.mean(np.abs(np.diff(patch, axis=0)))) / cell_h
+            dz_col = float(np.mean(np.abs(np.diff(patch, axis=1)))) / cell_w
+            # Cap at 100% slope (45°) — Perlin noise can produce unrealistic spikes
+            slope_percentage = min((dz_row + dz_col) * 100.0, 100.0)
         else:
             slope_percentage = 0.0
 
@@ -264,6 +372,12 @@ class AnalystAgent(Agent):
 
         # Calculate TTI (Time To Impact) using Rothermel as baseline
         self.tti_value = self._calculate_tti(min_distance, self.ros_value)
+
+        # BDI intention revision: when Commander has already ordered evacuation
+        # (Phase ≥ 2) apply a 20% conservative reduction to TTI so we do not
+        # falsely reassure the Commander while civilians are still moving.
+        if self.current_phase >= 2 and self.tti_value < float('inf'):
+            self.tti_value *= 0.80
 
         # Override TTI with step-ahead predictor if trained
         if (self.step_ahead_predictor is not None and

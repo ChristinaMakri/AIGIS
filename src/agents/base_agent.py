@@ -1,6 +1,13 @@
 """
 Abstract Base Agent Class
 All agents inherit from this class
+
+The Perceive → Decide → Act cycle implemented here is the canonical
+BDI (Belief-Desire-Intention) agent execution loop:
+
+  Rao, A.S. & Georgeff, M.P. (1995).
+  "BDI agents: From theory to practice."
+  Proceedings of ICMAS-95, pp. 312–319. AAAI Press.
 """
 from abc import ABC, abstractmethod
 from typing import List, Tuple, Optional

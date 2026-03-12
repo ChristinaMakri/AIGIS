@@ -77,15 +77,22 @@ WIND_DIRECTION = [np.sin(_wind_rad), -np.cos(_wind_rad)]  # [dx, dy] in grid coo
 # =============================================================================
 # FIRE SPREAD (Rothermel-Based)
 # =============================================================================
+# Rothermel, R.C. (1972). A Mathematical Model for Predicting Fire Spread in
+# Wildland Fuels. USDA Forest Service Research Paper INT-115.
+# Intermountain Forest and Range Experiment Station, Ogden, UT.
+#
+# Model:  ROS = R_base × (1 + φ_wind) × (1 + φ_slope)
+#   φ_wind  = C × U^B         (eq. 47)
+#   φ_slope = 5.275 × tan²(θ) (eq. 51)
 
 FIRE_SPREAD_PROB_BASE = 0.3  # Base probability
 FIRE_BURNOUT_PROB = 0.1  # Probability per step that burning cell burns out
 
-# Rothermel Parameters
-ROTHERMEL_BASE_ROS = 0.5  # meters/second
-ROTHERMEL_WIND_C = 0.4
-ROTHERMEL_WIND_B = 1.5
-ROTHERMEL_SLOPE_FACTOR = 5.275  # Slope coefficient
+# Rothermel Parameters (see Rothermel 1972)
+ROTHERMEL_BASE_ROS = 0.5  # meters/second — baseline rate of spread R_base
+ROTHERMEL_WIND_C = 0.4    # wind coefficient C (eq. 47)
+ROTHERMEL_WIND_B = 1.5    # wind exponent B (eq. 47)
+ROTHERMEL_SLOPE_FACTOR = 5.275  # slope coefficient (eq. 51, empirically derived)
 
 # Temperature Model Parameters
 FIRE_TEMP_BURNING = 100.0  # °C - Temperature of actively burning cells
@@ -95,6 +102,11 @@ FIRE_TEMP_AMBIENT = 20.0  # °C - Ambient temperature (baseline)
 # =============================================================================
 # FUEL TYPE MODELS (NFFL - Northern Forest Fire Laboratory)
 # =============================================================================
+# Anderson, H.E. (1982). Aids to Determining Fuel Models for Estimating Fire
+# Behavior. USDA Forest Service General Technical Report INT-122.
+# Intermountain Forest and Range Experiment Station, Ogden, UT.
+#
+# 13 standard NFFL fuel model classifications used below.
 
 # Fuel Model Definitions
 # Based on Anderson's 13 Fire Behavior Fuel Models
@@ -239,11 +251,11 @@ NUM_CIVILIANS = 20
 # Signal equation: I_detected = I_actual/(d² + ε) × (1 + cos(θ)) + N(0,σ)
 # Where: d = distance, θ = wind angle, σ = noise
 
-SENTINEL_DETECTION_RADIUS = 30  # grid cells (spatial optimization: O(R²) scan)
-SENTINEL_SIGNAL_EPSILON = 1.0  # Prevents division by zero in signal equation
-SENTINEL_NOISE_SIGMA = 5.0  # Gaussian noise std dev (environmental noise)
-SENTINEL_TRIGGER_THRESHOLD = 15.0  # Intensity threshold for fire alert
-SENTINEL_DEBOUNCE_STEPS = 3  # Must detect for N consecutive steps (prevents false alarms)
+SENTINEL_DETECTION_RADIUS = 120  # grid cells — covers full 200×200 grid from corners
+SENTINEL_SIGNAL_EPSILON = 1.0    # Prevents division by zero in signal equation
+SENTINEL_NOISE_SIGMA = 0.002     # Gaussian noise std dev (scaled to weak far-field signals)
+SENTINEL_TRIGGER_THRESHOLD = 0.01  # Detection threshold for I/(d²+ε)×(1+cos θ) signal
+SENTINEL_DEBOUNCE_STEPS = 3      # Must detect for N consecutive steps (prevents false alarms)
 
 # =============================================================================
 # ANALYST AGENT (Fuzzy Logic)
@@ -397,6 +409,71 @@ DEBUG_MODE = False
 LOG_AGENT_MESSAGES = False  # Log all FIPA-ACL messages
 LOG_PHASE_TRANSITIONS = True  # Log Commander phase changes
 LOG_WIND_CHANGES = True  # Log when wind direction shifts
+
+# =============================================================================
+# DATA CONNECTORS — API KEYS
+# =============================================================================
+# NASA FIRMS: free key at https://firms.modaps.eosdis.nasa.gov/api/
+FIRMS_MAP_KEY = "656c1b1a74cf38b3b21bd3e8b14aa800"
+
+# OpenAQ: free key at https://openaq.org/
+OPENAQ_API_KEY = "6dbff8aefa3c76caf6a50a53be92f030f848c440827e7a80c06a1360cb6a14e1"
+
+# =============================================================================
+# RISK MONITOR AGENT (Pre-Ignition)
+# =============================================================================
+# FWI danger thresholds from:
+# Van Wagner, C.E. (1987). Development and Structure of the Canadian Forest
+# Fire Weather Index System. Forestry Technical Report 35. Canadian Forestry
+# Service, Ottawa.
+NUM_RISK_MONITORS = 1
+RISK_MONITOR_UPDATE_INTERVAL = 20   # Steps between full risk-grid recomputations
+FWI_HIGH_RISK_THRESHOLD    = 30.0   # FWI ≥ 30 → High pre-fire warning to Commander
+FWI_EXTREME_RISK_THRESHOLD = 50.0   # FWI ≥ 50 → Extreme pre-fire warning
+
+# =============================================================================
+# AMBULANCE AGENT (Medical Extraction)
+# =============================================================================
+NUM_AMBULANCES = 2
+AMBULANCE_MAX_SPEED       = 3.0  # grid cells/step (same as Rescuer)
+AMBULANCE_RISK_THRESHOLD  = 0.7  # Refuse missions through zones hotter than this
+
+# =============================================================================
+# SMOKE MODEL (Inness et al. 2019 — CAMS Reanalysis)
+# =============================================================================
+# Wildfire smoke plume physics grounded in:
+#   Inness, A. et al. (2019). "The CAMS reanalysis of atmospheric composition."
+#   Atmos. Chem. Phys., 19(6), pp. 3515–3556.
+#   DOI: 10.5194/acp-19-3515-2019
+#
+# Simplified advection–diffusion: ∂C/∂t = -U·∇C + D·∇²C + S
+#   C  = smoke concentration per cell (kg/m³ proxy, 0–1 normalised)
+#   U  = wind vector (from Rothermel wind model)
+#   D  = isotropic diffusion coefficient
+#   S  = source term (burning cells)
+SMOKE_SOURCE_STRENGTH   = 0.30   # Smoke emitted per burning cell per step [0-1]
+SMOKE_DIFFUSION_RATE    = 0.08   # Isotropic lateral diffusion per step
+SMOKE_DECAY_RATE        = 0.05   # Dissipation rate per step (atmosphere scavenging)
+SMOKE_WIND_ADVECTION    = 0.40   # Fraction advected downwind per step
+
+# =============================================================================
+# CIVILIAN INJURY MODEL (Inness et al. 2019 + Cova & Johnson 2002)
+# =============================================================================
+# Cumulative PM2.5 exposure → incapacitation threshold, grounded in:
+#   Inness, A. et al. (2019) — CAMS PM2.5 smoke product
+#   Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of neighborhood
+#   evacuations in the urban-wildland interface." Env. Planning A, 34(12).
+#   Smoke inhalation is identified as a primary casualty driver in WUI fires.
+CIVILIAN_INJURY_THRESHOLD  = 5.0   # Cumulative smoke exposure before injury
+CIVILIAN_SMOKE_PANIC_SCALE = 0.02  # Extra panic per unit smoke concentration
+
+# =============================================================================
+# AIR QUALITY EFFECTS ON CIVILIANS
+# =============================================================================
+# Each step, civilian panic increases by: AQI_PANIC_WEIGHT × (aqi / 500)
+AQI_PANIC_WEIGHT  = 0.02   # Max +0.02/step at AQI=500 (~10 steps to add 0.2 panic)
+# Max speed reduction at AQI=500: 30% slower (smoke inhalation, reduced visibility)
+AQI_SPEED_PENALTY = 0.30   # multiply free-flow speed by (1 - AQI_SPEED_PENALTY × aqi/500)
 
 # =============================================================================
 # CONFIGURATION VALIDATION

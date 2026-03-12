@@ -3,6 +3,22 @@ Civilian Agent - BDI (Belief-Desire-Intention) Architecture
 Implements Greenshields' Traffic Model + Social Force Model (Herding)
 Features 3-state cognitive machine: Rational, Confused, Herding
 Panic equation with fire distance and family separation factors
+
+BDI architecture:
+  Rao, A.S. & Georgeff, M.P. (1995).
+  "BDI agents: From theory to practice."
+  Proceedings of ICMAS-95, pp. 312–319. AAAI Press.
+
+Greenshields' macroscopic traffic-flow model (speed–density relation):
+  Greenshields, B.D., Bibbins, J.R., Channing, W.S., & Miller, H.H. (1935).
+  "A study of traffic capacity."
+  Highway Research Board Proceedings, 14, pp. 448–477.
+  Formula: V = V_free × (1 − ρ / ρ_jam)
+
+Evacuation micro-simulation in the wildland–urban interface:
+  Cova, T.J. & Johnson, J.P. (2002).
+  "Microsimulation of neighborhood evacuations in the urban-wildland interface."
+  Environment and Planning A, 34(12), pp. 2211–2230.
 """
 import numpy as np
 import networkx as nx
@@ -20,19 +36,79 @@ from ..config import (
     CIVILIAN_CONFUSED_SPEED_FACTOR,
     CIVILIAN_VISION_RADIUS,
     CIVILIAN_HERDING_INFLUENCE,
-    CIVILIAN_PATH_RECALC_INTERVAL
+    CIVILIAN_PATH_RECALC_INTERVAL,
+    AQI_PANIC_WEIGHT,
+    AQI_SPEED_PENALTY,
+    CIVILIAN_INJURY_THRESHOLD,
+    CIVILIAN_SMOKE_PANIC_SCALE,
 )
 
 
 class CivilianAgent(Agent):
     """
-    BDI agent that evacuates using traffic physics and panic psychology.
+    ═══════════════════════════════════════════════════════════════════════
+    AGENT:        Civilian
+    ARCHITECTURE: BDI — Three-State Cognitive Machine with Crowd Dynamics
+    ───────────────────────────────────────────────────────────────────────
+    BELIEFS
+      • beliefs             set of facts: warning_received, fire_nearby,
+                            evacuation_ordered, shelter_in_place,
+                            fwi_warning_received
+      • panic_level         0.0 (calm) – 1.0 (extreme panic)
+      • cognitive_state     rational | confused | herding
+      • fire_visible        fire within vision radius
+      • fire_distance       distance to nearest visible fire (grid cells)
+      • current_speed       actual movement speed (Greenshields model)
+      • current_aqi         air quality index (smoke effects on speed/panic)
+      • is_evacuated        has reached a safe zone
+      • has_family          30% of civilians have family (psychological factor)
+      • family_separated    family-separation stress amplifier
 
-    Architecture: Belief-Desire-Intention with Crowd Dynamics
-    - Movement: Greenshields' Traffic Model (speed depends on local density)
-    - Cognition: 3-state machine (Rational, Confused, Herding)
-    - Panic: Distance-based equation with family separation factor
-    - Herding: Follows crowd at high panic, even to dead ends
+    DESIRES
+      • Survive by reaching a safe zone
+      • Maintain rational decision-making under stress
+      • Keep family together if applicable
+
+    INTENTIONS  (selected by cognitive state)
+      rational:   A* evacuation to safety_node (optimal path)
+      confused:   slow A* evacuation (degraded speed × CONFUSED_SPEED_FACTOR)
+      herding:    follow nearest crowd via Social Force Model
+      freeze:     panic freeze — do nothing this step
+      move_random: random panic movement (herding without leader)
+
+    COMMUNICATION
+      SENDS
+        → INFORM  ambulances  {type:'INJURY_REPORT', agent_id, node, lat, lon}
+              sent once when smoke_exposure exceeds CIVILIAN_INJURY_THRESHOLD;
+              triggers Ambulance self-dispatch to the civilian's location.
+      RECEIVES
+        ← INFORM   commander  {type:'WARNING', urgency:'MEDIUM'}
+              pre-alert: prepare to evacuate
+        ← INFORM   commander  {type:'FWI_WARNING', urgency, fwi,
+                               high_risk_zones}
+              pre-fire weather warning
+        ← REQUEST  commander  {type:'EVACUATE', urgency:'HIGH'}
+              mass evacuation order (Phase 2)
+        ← REQUEST  commander  {type:'REDIRECT_TO_SAFE_ZONE',
+                               urgency:'CRITICAL'}
+              shelter-in-place order (Phase 3)
+
+    BIBLIOGRAPHY
+      [1] Rao, A.S. & Georgeff, M.P. (1995). "BDI agents: From theory to
+          practice." ICMAS-95, pp. 312–319. AAAI Press.
+          BDI belief-revision and intention-selection cycle.
+      [2] Greenshields, B.D. et al. (1935). "A study of traffic capacity."
+          Highway Research Board Proceedings, 14, pp. 448–477.
+          Speed–density: V = V_free × (1 − ρ/ρ_jam)
+      [3] Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of
+          neighborhood evacuations in the urban-wildland interface."
+          Environment and Planning A, 34(12), pp. 2211–2229.
+          Evacuation route choice and contraflow modelling.
+      [4] Inness, A. et al. (2019). "The CAMS reanalysis of atmospheric
+          composition." Atmos. Chem. Phys., 19(6), pp. 3515–3556.
+          AQI data source (PM2.5 → panic/speed penalty); also grounds the
+          cumulative smoke_exposure injury model (smoke_exposure → is_injured).
+    ═══════════════════════════════════════════════════════════════════════
     """
 
     def __init__(self, agent_id: str, position: Tuple[float, float]):
@@ -73,6 +149,10 @@ class CivilianAgent(Agent):
         self.fire_distance = float('inf')  # Distance to nearest visible fire (meters)
         self.cognitive_state = "rational"  # Current cognitive state: rational|confused|herding
 
+        # Instance-level panic thresholds (can be overridden by ParameterAdapter)
+        self.panic_rational_threshold = CIVILIAN_PANIC_RATIONAL
+        self.panic_confused_threshold = CIVILIAN_PANIC_CONFUSED
+
         # ===== NAVIGATION STATE =====
         # Uses A* pathfinding on OpenStreetMap road network
         self.current_node: Optional[int] = None  # Current graph node
@@ -97,12 +177,24 @@ class CivilianAgent(Agent):
         self.last_movement = None  # Direction vector for others to follow
 
         # ===== PERFORMANCE OPTIMIZATION: STAGGERED PATHFINDING =====
-        # Only recalculate A* path every N=20 steps + random offset
-        # Prevents all agents from recalculating simultaneously (CPU spike)
-        # Random offset spreads computational load across steps
-        self.path_recalc_interval = CIVILIAN_PATH_RECALC_INTERVAL  # Steps between recalcs
-        self.steps_since_recalc = 0  # Counter for tracking when to recalculate
-        self.recalc_offset = np.random.randint(0, self.path_recalc_interval)  # Random phase offset
+        self.path_recalc_interval = CIVILIAN_PATH_RECALC_INTERVAL
+        self.steps_since_recalc = 0
+        self.recalc_offset = np.random.randint(0, self.path_recalc_interval)
+
+        # ===== AIR QUALITY (smoke effects) =====
+        # Current AQI from environment (0-500 scale).
+        # High smoke raises panic and reduces movement speed.
+        self.current_aqi: float = 0.0
+
+        # ===== SMOKE INJURY MODEL (Inness et al. 2019 + Cova & Johnson 2002) =====
+        # Cumulative smoke exposure → injury incapacitation.
+        # Each step: smoke_exposure += smoke_grid[r,c]
+        # When exposure > CIVILIAN_INJURY_THRESHOLD → is_injured = True.
+        # Injured civilians cannot move and send an INJURY_REPORT to ambulances.
+        self.smoke_exposure: float = 0.0
+        self.is_injured: bool = False
+        self.injury_threshold: float = CIVILIAN_INJURY_THRESHOLD
+        self._injury_reported: bool = False  # Ensure we send only one INJURY_REPORT
 
     def perceive(self, environment) -> None:
         """
@@ -121,12 +213,38 @@ class CivilianAgent(Agent):
         - β: Family separation penalty (adds constant stress)
         - decay: Gradual reduction when no fire visible
         """
+        # ===== READ AIR QUALITY FROM ENVIRONMENT =====
+        self.current_aqi = float(getattr(environment, 'air_quality_index', 0.0))
+
+        # ===== SMOKE EXPOSURE ACCUMULATION (Inness et al. 2019) =====
+        # Cumulative PM2.5 proxy: read per-cell smoke concentration from grid.
+        # Extra panic from local smoke density (beyond AQI baseline).
+        if self.grid_position is not None and not self.is_injured:
+            r, c = self.grid_position
+            smoke_conc = float(getattr(environment, 'smoke_grid',
+                                        np.zeros(environment.grid_shape))[r, c])
+            self.smoke_exposure += smoke_conc
+            # Smoke also amplifies panic
+            self.panic_level = min(1.0,
+                                   self.panic_level + smoke_conc * CIVILIAN_SMOKE_PANIC_SCALE)
+            if self.smoke_exposure >= self.injury_threshold:
+                self.is_injured = True
+                print(f"  [{self.agent_id}]: smoke-injured "
+                      f"(exposure={self.smoke_exposure:.1f})")
+
         # ===== PROCESS MESSAGES (Commander → Civilian Communication) =====
         for message in self.messages_inbox:
             # Pre-Evacuation Warning (Phase 1): Commander alerts of approaching fire
             if message.performative == "INFORM" and message.content.get('type') == 'WARNING':
                 self.beliefs.add('warning_received')
-                self.panic_level = min(1.0, self.panic_level + 0.1)  # Small panic increase
+                self.panic_level = min(1.0, self.panic_level + 0.1)
+
+            # FWI pre-fire warning: fire conditions dangerous even before ignition
+            elif message.performative == "INFORM" and message.content.get('type') == 'FWI_WARNING':
+                urgency = message.content.get('urgency', 'MEDIUM')
+                self.beliefs.add('fwi_warning_received')
+                delta = 0.15 if urgency == 'HIGH' else 0.05
+                self.panic_level = min(1.0, self.panic_level + delta)
 
             # Evacuation Orders (Phase 2): Commander orders mass evacuation
             elif message.performative == "REQUEST":
@@ -174,6 +292,7 @@ class CivilianAgent(Agent):
         # Reset fire perception
         self.fire_visible = False
         self.fire_distance = float('inf')
+        self.beliefs.discard('fire_nearby')
 
         # Safety check: agent not yet placed on grid
         if self.grid_position is None:
@@ -194,6 +313,7 @@ class CivilianAgent(Agent):
                     # Check if cell is burning (state = 1)
                     if fire_grid[r, c] == 1:
                         self.fire_visible = True
+                        self.beliefs.add('fire_nearby')
 
                         # Calculate Euclidean distance in grid cells
                         dist = np.sqrt(dr**2 + dc**2)
@@ -229,15 +349,18 @@ class CivilianAgent(Agent):
         """
         if self.fire_visible and self.fire_distance < float('inf'):
             # ===== FIRE PROXIMITY FACTOR =====
-            # Inverse distance: closer fire = higher panic
-            # max(distance, 0.5) prevents division by very small numbers
             panic_increase = CIVILIAN_PANIC_ALPHA * (1.0 / max(self.fire_distance, 0.5))
             self.panic_level = min(1.0, self.panic_level + panic_increase)
         else:
             # ===== PANIC DECAY =====
-            # When no fire visible, panic gradually decreases
-            # Simulates calming down when threat is not immediate
             self.panic_level = max(0.0, self.panic_level - CIVILIAN_PANIC_DECAY)
+
+        # ===== AIR QUALITY / SMOKE FACTOR =====
+        # Smoke raises panic even without visible fire (smell, reduced visibility,
+        # breathing difficulty). Contribution is proportional to AQI (0–500 scale).
+        if self.current_aqi > 50.0:
+            aqi_panic = AQI_PANIC_WEIGHT * (self.current_aqi / 500.0)
+            self.panic_level = min(1.0, self.panic_level + aqi_panic)
 
         # ===== FAMILY SEPARATION FACTOR =====
         # If agent has family and they are separated, add constant stress
@@ -272,12 +395,12 @@ class CivilianAgent(Agent):
         progressively. At extreme panic, individuals follow the crowd even
         when it leads to danger (documented in multiple disasters).
         """
-        if self.panic_level < CIVILIAN_PANIC_RATIONAL:
-            self.cognitive_state = "rational"  # Below 0.4: optimal behavior
-        elif self.panic_level < CIVILIAN_PANIC_CONFUSED:
-            self.cognitive_state = "confused"  # 0.4-0.7: degraded performance
+        if self.panic_level < self.panic_rational_threshold:
+            self.cognitive_state = "rational"  # Below threshold: optimal behavior
+        elif self.panic_level < self.panic_confused_threshold:
+            self.cognitive_state = "confused"  # Middle range: degraded performance
         else:
-            self.cognitive_state = "herding"  # Above 0.7: follows crowd
+            self.cognitive_state = "herding"  # Above threshold: follows crowd
 
     def _assess_local_density(self, environment) -> None:
         """
@@ -382,14 +505,30 @@ class CivilianAgent(Agent):
 
     def _calculate_speed_greenshields(self) -> float:
         """
-        Calculate current speed using Greenshields' Traffic Model.
-        V_current = V_free_flow * (1 - ρ_local / ρ_jam)
+        Calculate current speed using Greenshields' macroscopic traffic model.
+
+        V_current = V_free × (1 − ρ_local / ρ_jam)
+
+        The linear speed–density relationship was first described in:
+          Greenshields, B.D., Bibbins, J.R., Channing, W.S., & Miller, H.H. (1935).
+          "A study of traffic capacity."
+          Highway Research Board Proceedings, 14, pp. 448–477.
+
+        Extended here with an AQI smoke penalty (Inness et al., 2019) and a
+        cognitive-state modifier (Cova & Johnson, 2002).
         """
         if self.current_edge_density >= self.rho_jam:
             # Gridlock!
             return 0.0
 
         speed = self.v_free_flow * (1 - (self.current_edge_density / self.rho_jam))
+
+        # ===== SMOKE / AQI SPEED PENALTY =====
+        # High AQI (smoke inhalation, reduced visibility) slows movement.
+        # At AQI=500 (hazardous) speed is reduced by AQI_SPEED_PENALTY (default 30%).
+        if self.current_aqi > 50.0:
+            smoke_factor = 1.0 - AQI_SPEED_PENALTY * min(self.current_aqi / 500.0, 1.0)
+            speed *= max(smoke_factor, 0.1)  # Never reduce to absolute zero
 
         # Additional speed reduction in confused state
         if self.cognitive_state == "confused":
@@ -404,6 +543,26 @@ class CivilianAgent(Agent):
         """
         if not self.intentions:
             return
+
+        # ===== SMOKE INJURY — send INJURY_REPORT once, then stay still =====
+        # Grounded in Inness et al. (2019) — CAMS PM2.5 smoke incapacitation.
+        if self.is_injured:
+            if not self._injury_reported:
+                self._injury_reported = True
+                injury_msg = Message(
+                    sender=self.agent_id,
+                    receiver="ambulances",
+                    performative="INFORM",
+                    content={
+                        'type': 'INJURY_REPORT',
+                        'agent_id': self.agent_id,
+                        'node': self.current_node,
+                        'lat': self.position[0] if self.position else None,
+                        'lon': self.position[1] if self.position else None,
+                    }
+                )
+                self.send_message(injury_msg)
+            return  # Injured civilians cannot move — await ambulance
 
         # Calculate current speed based on traffic density
         self.current_speed = self._calculate_speed_greenshields()
@@ -497,8 +656,11 @@ class CivilianAgent(Agent):
             self.last_movement = np.array([new_col - col, new_row - row], dtype=np.float32)
             self.grid_position = (new_row, new_col)
             self.position = environment.grid_to_latlon(new_row, new_col)
+        elif environment.fire_grid[new_row, new_col] == 1:
+            # Crowd is heading into fire — override with goal-directed safety routing
+            self._move_to_safety(environment)
         else:
-            # Blocked, try random movement
+            # Blocked by obstacle, try random movement
             self._move_random(environment)
 
     def _move_to_safety(self, environment) -> None:

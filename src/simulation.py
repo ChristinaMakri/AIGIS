@@ -9,7 +9,8 @@ from .fire_simulation import FireSimulation
 from .message import Message
 from .agents import (
     SentinelAgent, AnalystAgent, CommanderAgent,
-    RescuerAgent, FirefighterAgent, CivilianAgent
+    RescuerAgent, FirefighterAgent, CivilianAgent,
+    RiskMonitorAgent, AmbulanceAgent,
 )
 from .config import *
 
@@ -21,7 +22,8 @@ class AIGISSimulation:
     """
 
     def __init__(self, lat: float, lon: float, radius: float, mode: str = 'gui',
-                 run_id: int = 0, fire_locations: list = None):
+                 run_id: int = 0, fire_locations: list = None,
+                 config_overrides: dict = None):
         """
         Initialize simulation.
 
@@ -36,6 +38,7 @@ class AIGISSimulation:
         """
         self.mode = mode
         self.lat, self.lon, self.radius = lat, lon, radius
+        self._config_overrides = config_overrides or {}
 
         # Initialize random seed per-run for Monte Carlo experiments
         # Each run gets a unique seed to ensure different random sequences
@@ -53,6 +56,18 @@ class AIGISSimulation:
         # Load real weather data if available
         self._load_weather_data()
 
+        # Load Fire Weather Index (FWI) data — pre-ignition risk
+        self._load_fwi_data()
+
+        # Load NASA FIRMS historical hotspot density
+        self._load_firms_data()
+
+        # Load air quality index (AQI) from OpenAQ
+        self._load_air_quality_data()
+
+        # Load EMS facilities (hospitals, ambulance stations) from OSM
+        self._load_ems_data()
+
         # Initialize fire simulation
         self.fire_sim = FireSimulation(self.environment)
 
@@ -66,6 +81,10 @@ class AIGISSimulation:
         # This allows Commander to count active civilians for accurate ECT
         self.environment.agents = self.agents
 
+        # Expose fire_simulation on environment so FirefighterAgent can read
+        # wind_direction for wind-aware fire-line placement (Rothermel 1972).
+        self.environment.fire_simulation = self.fire_sim
+
         # Give commander a reference to the fire simulation for ML feature extraction
         if self.agents['commander']:
             self.agents['commander'].fire_sim_ref = self.fire_sim
@@ -74,6 +93,7 @@ class AIGISSimulation:
         self.metrics = {
             'casualties': [],
             'evacuated': [],
+            'injured': [],
             'panic_levels': [],
             'active_fires': [],
             'burnt_cells': [],
@@ -153,6 +173,66 @@ class AIGISSimulation:
 
         except Exception as e:
             print(f"  ⚠️  Failed to load population data: {e}")
+
+    def _load_fwi_data(self):
+        """Fetch Fire Weather Index components from Open-Meteo (no key required)."""
+        try:
+            from .data_connectors import FWIConnector
+            connector = FWIConnector()
+            fwi = connector.fetch(self.lat, self.lon)
+            self.environment.fwi_data = fwi
+            print(f"  ✅ FWI loaded: index={fwi['fwi']:.1f} ({fwi['risk_level']})")
+        except Exception as e:
+            print(f"  ⚠️  FWI data unavailable ({e}). Pre-ignition risk uses defaults.")
+
+    def _load_firms_data(self):
+        """Fetch NASA FIRMS ignition density. Requires FIRMS_MAP_KEY in config."""
+        try:
+            from .data_connectors import FIRMSConnector
+            from .config import FIRMS_MAP_KEY
+            connector = FIRMSConnector(map_key=FIRMS_MAP_KEY)
+            radius_deg = self.radius / 111320  # metres → degrees (approx)
+            density = connector.build_ignition_density(
+                self.lat, self.lon,
+                radius_deg=max(radius_deg * 3, 0.1),
+                grid_shape=self.environment.grid_shape,
+                days=7,
+            )
+            if density is not None:
+                self.environment.firms_density = density
+                hotspots = int((density > 0).sum())
+                if hotspots:
+                    print(f"  ✅ FIRMS: {hotspots} historical ignition cells loaded.")
+        except Exception as e:
+            print(f"  ⚠️  FIRMS data unavailable ({e}). Historical ignition density = 0.")
+
+    def _load_air_quality_data(self):
+        """Fetch current AQI from OpenAQ. Requires OPENAQ_API_KEY in config."""
+        try:
+            from .data_connectors import AirQualityConnector
+            from .config import OPENAQ_API_KEY
+            connector = AirQualityConnector(api_key=OPENAQ_API_KEY)
+            aq = connector.fetch(self.lat, self.lon)
+            self.environment.air_quality_index = float(aq.get('aqi', 0.0))
+            print(f"  ✅ Air quality: AQI={aq['aqi']:.0f} ({aq['advisory']})")
+        except Exception as e:
+            print(f"  ⚠️  Air quality data unavailable ({e}). AQI=0 (clean air assumed).")
+
+    def _load_ems_data(self):
+        """Fetch hospital and station locations from OSM via osmnx."""
+        try:
+            from .data_connectors import EMSConnector
+            connector = EMSConnector()
+            nodes = connector.hospital_nodes(
+                self.lat, self.lon, self.radius, self.environment.graph
+            )
+            self.environment.hospital_nodes = nodes
+            if nodes:
+                print(f"  ✅ EMS: {len(nodes)} hospital node(s) registered for ambulance routing.")
+            else:
+                print("  ℹ️  EMS: no hospitals in OSM for this area — ambulances will use safe zones.")
+        except Exception as e:
+            print(f"  ⚠️  EMS data unavailable ({e}). Ambulances will use safe zones.")
 
     def _load_weather_data(self):
         """Load real weather data if available"""
@@ -262,20 +342,27 @@ class AIGISSimulation:
             'commander': None,
             'rescuers': [],
             'firefighters': [],
-            'civilians': []
+            'civilians': [],
+            'risk_monitors': [],
+            'ambulances': [],
         }
 
         min_lon, min_lat, max_lon, max_lat = self.environment.bounds
         center_lat = self.environment.lat_center
         center_lon = self.environment.lon_center
 
-        # --- Sentinels: evenly-spaced perimeter circle (aerial surveillance coverage) ---
+        # --- Sentinels: four corners of the map for maximum coverage of edge-ignition zones ---
         print(f"  🔭 Creating {NUM_SENTINELS} Sentinel agents...")
+        corner_offsets = [
+            ( 0.85,  0.85),   # NE corner
+            (-0.85,  0.85),   # SE corner
+            (-0.85, -0.85),   # SW corner
+            ( 0.85, -0.85),   # NW corner
+        ]
         for i in range(NUM_SENTINELS):
-            angle = (2 * np.pi * i) / NUM_SENTINELS
-            offset = 0.4
-            lat = center_lat + offset * (max_lat - min_lat) * np.sin(angle)
-            lon = center_lon + offset * (max_lon - min_lon) * np.cos(angle)
+            dlat, dlon = corner_offsets[i % len(corner_offsets)]
+            lat = center_lat + dlat * (max_lat - min_lat) * 0.5
+            lon = center_lon + dlon * (max_lon - min_lon) * 0.5
             sentinel = SentinelAgent(f"sentinel_{i}", (lat, lon))
             sentinel.grid_position = self.environment.latlon_to_grid(lat, lon)
             agents['sentinels'].append(sentinel)
@@ -288,6 +375,11 @@ class AIGISSimulation:
         print("  ⚔️  Creating Commander agent...")
         agents['commander'] = CommanderAgent("commander", (center_lat, center_lon))
         agents['commander'].grid_position = self.environment.latlon_to_grid(center_lat, center_lon)
+        # Apply learned parameter overrides
+        overrides = self._config_overrides
+        if 'phase_monitor_mult'  in overrides: agents['commander'].phase_monitor_mult  = overrides['phase_monitor_mult']
+        if 'phase_prealert_mult' in overrides: agents['commander'].phase_prealert_mult = overrides['phase_prealert_mult']
+        if 'phase_evacuate_mult' in overrides: agents['commander'].phase_evacuate_mult = overrides['phase_evacuate_mult']
 
         # --- Rescuers + Firefighters: real OSM emergency stations ---
         station_positions = self._fetch_station_positions()
@@ -317,7 +409,24 @@ class AIGISSimulation:
         for i, (lat, lon) in enumerate(civ_positions):
             civilian = CivilianAgent(f"civilian_{i}", (lat, lon))
             civilian.grid_position = self.environment.latlon_to_grid(lat, lon)
+            if 'panic_rational' in overrides: civilian.panic_rational_threshold = overrides['panic_rational']
+            if 'panic_confused' in overrides: civilian.panic_confused_threshold = overrides['panic_confused']
             agents['civilians'].append(civilian)
+
+        # --- RiskMonitor: one instance, placed at map centre ---
+        print(f"  🔥 Creating {NUM_RISK_MONITORS} RiskMonitor agent(s)...")
+        for i in range(NUM_RISK_MONITORS):
+            rm = RiskMonitorAgent(f"risk_monitor_{i}", (center_lat, center_lon))
+            rm.grid_position = self.environment.latlon_to_grid(center_lat, center_lon)
+            agents['risk_monitors'].append(rm)
+
+        # --- Ambulances: spawned at hospital/station positions (or road nodes) ---
+        print(f"  🚑 Creating {NUM_AMBULANCES} Ambulance agent(s)...")
+        for i in range(NUM_AMBULANCES):
+            lat, lon = station_at(NUM_RESCUERS + NUM_FIREFIGHTERS + i)
+            amb = AmbulanceAgent(f"ambulance_{i}", (lat, lon))
+            amb.grid_position = self.environment.latlon_to_grid(lat, lon)
+            agents['ambulances'].append(amb)
 
         print("✅ All agents initialized!\n")
         return agents
@@ -326,6 +435,9 @@ class AIGISSimulation:
         """Execute one simulation step"""
         # 1. Fire spread (with dynamic wind)
         self.fire_sim.step()
+
+        # Reset claimed fire cells so each step firefighters pick fresh targets
+        self.environment.claimed_fire_cells = set()
 
         # 2. Update all agents (perceive -> decide -> act)
         self._update_agents()
@@ -340,6 +452,7 @@ class AIGISSimulation:
         self._collect_metrics()
 
         self.step += 1
+        self.environment.step_count = self.step
 
     def _update_agents(self):
         """Update all agents (perceive-decide-act cycle)"""
@@ -367,13 +480,21 @@ class AIGISSimulation:
         for civilian in self.agents['civilians']:
             civilian.update(self.environment)
 
+        # Update risk monitors (pre-ignition assessment)
+        for rm in self.agents['risk_monitors']:
+            rm.update(self.environment)
+
+        # Update ambulances
+        for amb in self.agents['ambulances']:
+            amb.update(self.environment)
+
         # Clear inboxes after processing
-        for agent_type in self.agents.values():
-            if isinstance(agent_type, list):
-                for agent in agent_type:
+        for agent_group in self.agents.values():
+            if isinstance(agent_group, list):
+                for agent in agent_group:
                     agent.clear_messages()
-            elif agent_type:
-                agent_type.clear_messages()
+            elif agent_group:
+                agent_group.clear_messages()
 
     def _route_messages(self):
         """Route messages between agents"""
@@ -398,6 +519,14 @@ class AIGISSimulation:
             elif receiver == "commander":
                 if self.agents['commander']:
                     self.agents['commander'].receive_message(message)
+
+            elif receiver == "ambulances":
+                for amb in self.agents['ambulances']:
+                    amb.receive_message(message)
+
+            elif receiver == "firefighters":
+                for ff in self.agents['firefighters']:
+                    ff.receive_message(message)
 
             elif receiver == "rescuers" or receiver == "broadcast":
                 # Broadcast to all rescuers
@@ -463,6 +592,10 @@ class AIGISSimulation:
             )
         else:
             self.metrics['panic_snapshots'].append([])
+
+        # Injured civilians (smoke inhalation)
+        injured = sum(1 for c in self.agents['civilians'] if c.is_injured)
+        self.metrics['injured'].append(injured)
 
         # Commander phase
         if self.agents['commander']:
@@ -530,12 +663,81 @@ class AIGISSimulation:
         """
         while self.step < max_steps and not self.is_complete():
             self.run_step()
+            self._print_step_summary()
 
-            # Progress update for batch mode
-            if self.mode == 'batch' and self.step % 50 == 0:
-                print(f"    Step {self.step}/{max_steps}")
-
+        self._print_final_report()
         return self.get_results()
+
+    def _print_step_summary(self):
+        """Print a one-line status for the current step."""
+        fire_stats = self.fire_sim.get_fire_statistics()
+        evacuated  = self.count_evacuated()
+        total      = len(self.agents['civilians'])
+        casualties = self.count_casualties()
+        active     = sum(1 for c in self.agents['civilians'] if c.is_active)
+        aqi        = getattr(self.environment, 'air_quality_index', 0.0)
+        phase      = (self.agents['commander'].current_phase
+                      if self.agents['commander'] else 0)
+
+        print(f"  Step {self.step:>4} | "
+              f"Fire: {fire_stats['burning_cells']:>3} burning / "
+              f"{fire_stats['burnt_cells']:>4} burnt | "
+              f"Evac: {evacuated}/{total} | "
+              f"Cas: {casualties} | "
+              f"Active: {active} | "
+              f"Phase: {phase} | "
+              f"AQI: {aqi:.0f}")
+
+    def _print_final_report(self) -> None:
+        """
+        Post-simulation summary report.
+
+        Metrics grounded in:
+          Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of neighborhood
+          evacuations in the urban-wildland interface." Environment and
+          Planning A, 34(12), pp. 2211-2230.
+            -> Evacuation clearance time, % evacuated, bottleneck analysis.
+          Wolshon, B. (2006). "Evacuation planning and engineering for
+          Hurricane Katrina." The Bridge, 36(1), pp. 27-34. NAE.
+            -> Evacuation success rate as primary performance indicator.
+        """
+        total   = len(self.agents['civilians'])
+        evac    = self.count_evacuated()
+        cas     = self.count_casualties()
+        injured = sum(1 for c in self.agents['civilians'] if c.is_injured)
+        active  = sum(1 for c in self.agents['civilians'] if c.is_active)
+        fire_stats = self.fire_sim.get_fire_statistics()
+        phase = self.agents['commander'].current_phase if self.agents['commander'] else 0
+
+        evac_rate = evac / total * 100 if total > 0 else 0
+        mort_rate = cas  / total * 100 if total > 0 else 0
+
+        ff_drops = sum(
+            1 for ff in self.agents['firefighters']
+            if ff.current_water < ff.water_capacity
+        )
+
+        print("\n" + "=" * 60)
+        print("AIGIS SIMULATION REPORT")
+        print("=" * 60)
+        print(f"  Steps run           : {self.step}")
+        print(f"  Final phase         : {phase}")
+        print(f"  Civilians total     : {total}")
+        print(f"  Evacuated           : {evac}  ({evac_rate:.1f}%)")
+        print(f"  Casualties          : {cas}   ({mort_rate:.1f}%)")
+        print(f"  Smoke-injured       : {injured}")
+        print(f"  Still active        : {active}")
+        print(f"  Burnt cells         : {fire_stats['burnt_cells']}")
+        print(f"  Remaining burning   : {fire_stats['burning_cells']}")
+        print(f"  Firefighter units   : {len(self.agents['firefighters'])} "
+              f"({ff_drops} used water)")
+        print(f"  Rescuer refusals    : {self.metrics['rescuer_refusals']}")
+        if self.metrics['panic_levels']:
+            avg_p = np.mean(self.metrics['panic_levels'])
+            max_p = np.max(self.metrics['panic_levels'])
+            print(f"  Avg panic           : {avg_p:.2f}")
+            print(f"  Peak panic          : {max_p:.2f}")
+        print("=" * 60 + "\n")
 
     def get_results(self) -> Dict[str, Any]:
         """Return final metrics dictionary"""
@@ -547,12 +749,14 @@ class AIGISSimulation:
         if self.agents['commander']:
             reconsideration_log = self.agents['commander'].reconsideration_log
 
+        injured = sum(1 for c in self.agents['civilians'] if c.is_injured)
         return {
             'steps': self.step,
             'steps_to_evacuate': self.step,
             'total_civilians': total_civilians,
             'casualties': casualties,
             'evacuated': evacuated,
+            'injured': injured,
             'mortality_rate': casualties / total_civilians if total_civilians > 0 else 0,
             'evacuation_success_rate': evacuated / total_civilians if total_civilians > 0 else 0,
             'avg_panic_level': np.mean(self.metrics['panic_levels']) if self.metrics['panic_levels'] else 0,
@@ -565,6 +769,7 @@ class AIGISSimulation:
             'history': {
                 'casualties': self.metrics['casualties'],
                 'evacuated': self.metrics['evacuated'],
+                'injured': self.metrics['injured'],
                 'panic_levels': self.metrics['panic_levels'],
                 'active_fires': self.metrics['active_fires'],
                 'burnt_cells': self.metrics['burnt_cells'],

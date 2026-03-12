@@ -2,6 +2,15 @@
 Sentinel Agent - Reactive Architecture
 Acts as a fire detection sensor with Signal Detection Theory
 Implements environmental attenuation based on distance and wind angle
+
+Signal Detection Theory (SDT) foundation:
+  Green, D.M. & Swets, J.A. (1966).
+  "Signal Detection Theory and Psychophysics."
+  John Wiley & Sons, New York. 467 pp.
+
+The sensor equation  I_detected = I_actual / (d² + ε) × (1 + cos θ) + N(0, σ)
+models inverse-square-law attenuation (d²), wind-enhancement (cos θ),
+and Gaussian environmental noise — all core SDT concepts.
 """
 import numpy as np
 from typing import Tuple, List
@@ -21,12 +30,44 @@ from ..config import (
 
 class SentinelAgent(Agent):
     """
-    Reactive agent that detects fire using Signal Detection Theory.
+    ═══════════════════════════════════════════════════════════════════════
+    AGENT:        Sentinel
+    ARCHITECTURE: Reactive — Signal Detection Theory (SDT)
+    ───────────────────────────────────────────────────────────────────────
+    BELIEFS
+      • detection_history   (row,col) → consecutive detection count
+      • wind_direction      normalised wind vector (updated each step from
+                            FireSimulation's oscillating model)
+      • detected_fires      confirmed events this step [(lat,lon,intensity)]
 
-    Architecture: Condition-Action Rules with Debouncing
-    - Signal attenuation based on distance and wind direction
-    - Debouncing protocol: 3 consecutive detections required
-    - Signal equation: I_detected = I_actual/(d^2 + ε) * (1 + cos(θ)) + N(0,σ)
+    DESIRES
+      • Detect active fires as early as possible
+      • Suppress false positives (require N consecutive detections before
+        reporting — SDT debouncing criterion)
+
+    INTENTIONS
+      • Scan circular neighbourhood each step using inverse-square-law
+        attenuation with wind-enhancement and Gaussian noise
+      • Apply debounce protocol: only report after ≥ SENTINEL_DEBOUNCE_STEPS
+        consecutive positive hits on the same cell
+      • Forward confirmed detections to Analyst immediately
+
+    COMMUNICATION
+      SENDS
+        → INFORM  analyst  {type,lat,lon,intensity,timestamp}
+              fire detection alert (after debounce threshold met)
+      RECEIVES
+        (none — pure reactive sensor; no incoming messages processed)
+
+    BIBLIOGRAPHY
+      [1] Green, D.M. & Swets, J.A. (1966). Signal Detection Theory and
+          Psychophysics. John Wiley & Sons, New York. 467 pp.
+          SDT equation: I_det = I_actual/(d²+ε) × (1+cosθ) + N(0,σ)
+          Threshold criterion β maps to self.threshold; σ to self.sigma.
+      [2] Rao, A.S. & Georgeff, M.P. (1995). "BDI agents: From theory to
+          practice." ICMAS-95, pp. 312–319. AAAI Press.
+          (Perceive → Decide → Act cycle inherited from BaseAgent)
+    ═══════════════════════════════════════════════════════════════════════
     """
 
     def __init__(self, agent_id: str, position: Tuple[float, float],
@@ -59,10 +100,12 @@ class SentinelAgent(Agent):
         self.detected_fires = []  # List of confirmed fire detections this step
 
         # ===== SIGNAL DETECTION THEORY PARAMETERS =====
-        # These parameters model realistic sensor limitations
+        # These parameters model realistic sensor limitations.
+        # SDT distinguishes signal from noise using a likelihood-ratio threshold.
+        # Ref: Green & Swets (1966), "Signal Detection Theory and Psychophysics."
         self.epsilon = SENTINEL_SIGNAL_EPSILON  # Prevents div-by-zero (d² + ε)
         self.sigma = SENTINEL_NOISE_SIGMA  # Gaussian noise std dev (environmental)
-        self.threshold = SENTINEL_TRIGGER_THRESHOLD  # Detection threshold
+        self.threshold = SENTINEL_TRIGGER_THRESHOLD  # Detection threshold (criterion β in SDT)
         self.debounce_steps = SENTINEL_DEBOUNCE_STEPS  # Consecutive detections required
 
         # ===== WIND DIRECTION (for signal attenuation) =====

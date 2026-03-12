@@ -51,7 +51,8 @@ class Environment:
                  grid_shape: Tuple[int, int],
                  safe_nodes: Set[int],
                  fuel_type_grid: Optional[np.ndarray] = None,
-                 radius: float = 2000.0):
+                 radius: float = 2000.0,
+                 num_road_exits: int = 0):
         self.graph = graph
         self.fuel_grid = fuel_grid
         self.obstacle_grid = obstacle_grid
@@ -87,11 +88,37 @@ class Environment:
         self.temperature = 25.0  # Ambient temperature (°C)
         self.humidity = 30.0  # Relative humidity (%)
 
+        # ---- Smoke concentration grid (Inness et al. 2019 — CAMS) ----------
+        # Per-cell smoke concentration [0, 1]; updated each step by FireSimulation.
+        # Used by: CivilianAgent (injury accumulation), SentinelAgent (detection σ).
+        self.smoke_grid: np.ndarray = np.zeros(grid_shape, dtype=np.float32)
+
+        # ---- Pre-ignition risk (populated by RiskMonitorAgent) ------------
+        # Per-cell ignition probability [0, 1]; 0 = no risk, 1 = extreme risk
+        self.ignition_risk_grid = np.zeros(grid_shape, dtype=np.float32)
+
+        # ---- FWI data (loaded from Open-Meteo at startup) -----------------
+        # Canadian Fire Weather Index components; dict from FWIConnector.fetch()
+        self.fwi_data: dict = {}
+
+        # ---- FIRMS historical ignition density (0–1 per cell) -------------
+        # Populated from NASA FIRMS hotspot history; used by RiskMonitorAgent
+        self.firms_density: np.ndarray = np.zeros(grid_shape, dtype=np.float32)
+
+        # ---- Air quality (loaded from OpenAQ at startup) ------------------
+        # US EPA AQI scale 0–500; drives civilian panic and speed
+        self.air_quality_index: float = 0.0
+
+        # ---- EMS: hospital road-network node IDs -------------------------
+        # Populated by EMSConnector; used by AmbulanceAgent for routing
+        self.hospital_nodes: list = []
+
         # Tracking
         self.step_count = 0
 
-        # Calculate number of exits (unique safe zones)
-        self.num_exits = len(safe_nodes) if safe_nodes else 1  # At least 1 (perimeter)
+        # Road exits = perimeter boundary nodes only (bottlenecks for ECT calculation)
+        # Internal safe zones (parks, beaches) are gathering points, not road exits
+        self.num_exits = num_road_exits if num_road_exits > 0 else max(1, len(safe_nodes) // 20)
 
     def latlon_to_grid(self, lat: float, lon: float) -> Tuple[int, int]:
         """Convert lat/lon coordinates to grid indices"""
@@ -113,7 +140,7 @@ class Environment:
         """Find nearest road network node to given coordinates"""
         try:
             return ox.distance.nearest_nodes(self.graph, lon, lat)
-        except:
+        except Exception:
             # Fallback if graph is empty or error
             return list(self.graph.nodes())[0] if len(self.graph.nodes()) > 0 else 0
 
@@ -154,7 +181,7 @@ class Environment:
             # Try perimeter node as last resort (edges of map are considered safe)
             try:
                 nearest_safe = self._get_perimeter_node()
-            except:
+            except Exception:
                 # Ultimate fallback: stay at current location
                 nearest_safe = from_node
 
@@ -242,7 +269,7 @@ class LiveMapBuilder:
 
         # Step 6: Identify safe zones
         print("  🛡️  Identifying safe zones...")
-        safe_nodes = self._identify_safe_zones(graph, bounds)
+        safe_nodes, num_road_exits = self._identify_safe_zones(graph, bounds)
 
         # Step 7: Fetch Corine Land Cover fuel types (or derive from forest raster)
         if USE_CORINE:
@@ -267,7 +294,8 @@ class LiveMapBuilder:
             grid_shape=self.grid_size,
             safe_nodes=safe_nodes,
             fuel_type_grid=fuel_type_grid,
-            radius=self.radius
+            radius=self.radius,
+            num_road_exits=num_road_exits,
         )
 
     def _fetch_corine_fuel(self, bounds: Tuple[float, float, float, float]) -> Optional[np.ndarray]:
@@ -567,15 +595,16 @@ class LiveMapBuilder:
         return elevation
 
     def _identify_safe_zones(self, graph: nx.MultiDiGraph,
-                            bounds: Tuple[float, float, float, float]) -> Set[int]:
+                            bounds: Tuple[float, float, float, float]) -> Tuple[Set[int], int]:
         """
         Identify safe nodes dynamically using OSM tags and perimeter nodes.
-        Returns a set of node IDs that are designated safe zones.
+        Returns (safe_nodes, num_road_exits) where num_road_exits is the count
+        of perimeter boundary nodes (used for ECT calculation by Commander).
         """
         safe_nodes = set()
 
         if len(graph.nodes) == 0:
-            return safe_nodes
+            return safe_nodes, 0
 
         # Method 1: Fetch safe zone features from OSM
         try:
@@ -583,7 +612,7 @@ class LiveMapBuilder:
                 for tag_value in tag_values:
                     try:
                         gdf = ox.features_from_bbox(
-                            bbox=(bounds[3], bounds[1], bounds[2], bounds[0]),
+                            bbox=bounds,  # (min_lon, min_lat, max_lon, max_lat) = (left, bottom, right, top)
                             tags={tag_key: tag_value}
                         )
 
@@ -605,6 +634,7 @@ class LiveMapBuilder:
             print(f"  ⚠️  Could not fetch safe zones: {e}")
 
         # Method 2: Add perimeter nodes (map edges) as safe
+        perimeter_nodes: Set[int] = set()
         if USE_PERIMETER_AS_SAFE:
             perimeter_nodes = self._get_perimeter_nodes(graph, bounds)
             safe_nodes.update(perimeter_nodes)
@@ -614,7 +644,7 @@ class LiveMapBuilder:
             perimeter_nodes = self._get_perimeter_nodes(graph, bounds)
             safe_nodes.update(perimeter_nodes)
 
-        return safe_nodes
+        return safe_nodes, max(len(perimeter_nodes), 1)
 
     def _get_perimeter_nodes(self, graph: nx.MultiDiGraph,
                             bounds: Tuple[float, float, float, float]) -> Set[int]:

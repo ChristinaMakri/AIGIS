@@ -17,10 +17,12 @@ import sys
 
 from src.simulation import AIGISSimulation
 from src.config import *
+from src.parameter_adapter import ParameterAdapter
 
 
 def run_single_simulation(lat: float, lon: float, radius: float,
-                          fire_locations: list = None):
+                          fire_locations: list = None,
+                          config_overrides: dict = None):
     """
     Run a single headless simulation instance.
 
@@ -29,19 +31,22 @@ def run_single_simulation(lat: float, lon: float, radius: float,
         lon: Center longitude
         radius: Map radius in meters
         fire_locations: List of (lat, lon) tuples for real fire ignition points.
+        config_overrides: Optional dict of config parameter overrides.
 
     Returns:
         Tuple of (results dict, AIGISSimulation instance)
     """
     sim = AIGISSimulation(lat, lon, radius, mode='batch',
-                          fire_locations=fire_locations)
+                          fire_locations=fire_locations,
+                          config_overrides=config_overrides or {})
     results = sim.run_until_complete()
     return results, sim
 
 
 def run_monte_carlo(lat: float, lon: float, radius: float,
                    num_runs: int, output_file: str,
-                   fire_locations: list = None) -> pd.DataFrame:
+                   fire_locations: list = None,
+                   config_overrides: dict = None) -> pd.DataFrame:
     """
     Run Monte Carlo experiments (N iterations) and export results to CSV.
 
@@ -80,6 +85,7 @@ def run_monte_carlo(lat: float, lon: float, radius: float,
     print(f"  Output: {output_file}")
     print("=" * 70 + "\n")
 
+    adapter = ParameterAdapter()
     results_list = []
 
     # Run N independent simulations
@@ -87,11 +93,20 @@ def run_monte_carlo(lat: float, lon: float, radius: float,
         print(f"\n🔬 Run {run_id + 1}/{num_runs}")
         print("-" * 70)
 
+        # Apply learned overrides from previous runs (skip on first run)
+        overrides = adapter.get_overrides() if run_id > 0 else {}
+        if config_overrides:
+            overrides.update(config_overrides)
+
         # Each run uses a different random seed for variability
         # Simulation runs in headless mode (no GUI) for speed
         sim = AIGISSimulation(lat, lon, radius, mode='batch', run_id=run_id,
-                              fire_locations=fire_locations)
+                              fire_locations=fire_locations,
+                              config_overrides=overrides)
         result = sim.run_until_complete()
+
+        # Feed outcome back to adapter for online learning
+        adapter.update(result)
 
         # Add metadata to results (exclude complex nested objects for CSV)
         result_flat = {k: v for k, v in result.items()
@@ -108,6 +123,8 @@ def run_monte_carlo(lat: float, lon: float, radius: float,
         print(f"  ✅ Complete: {result['steps']} steps, "
               f"{result['casualties']} casualties, "
               f"{result['evacuated']} evacuated")
+
+    adapter.print_summary()
 
     # Convert to pandas DataFrame for easy analysis
     df = pd.DataFrame(results_list)
@@ -176,6 +193,119 @@ def print_statistics(df: pd.DataFrame) -> None:
     print("\n" + "=" * 70)
 
 
+def save_visualization(sim: 'AIGISSimulation', result: dict,
+                        out_path: str = "aigis_result.png") -> str:
+    """
+    Render a 2×2 grid of maps and save to PNG:
+      Top-left:  Terrain / fuel type map
+      Top-right: Ignition risk grid (pre-fire probability)
+      Bottom-left: Final fire state
+      Bottom-right: NASA FIRMS historical hotspot density
+    """
+    try:
+        import matplotlib
+        matplotlib.use("Agg")  # headless backend, no display needed
+        import matplotlib.pyplot as plt
+        import matplotlib.colors as mcolors
+        from matplotlib.patches import Patch
+    except ImportError:
+        print("  ⚠️  matplotlib not installed — skipping visualization.")
+        return ""
+
+    env = sim.environment
+    fig, axes = plt.subplots(2, 2, figsize=(14, 11))
+    fig.suptitle(
+        f"AIGIS Simulation Results  |  ({sim.lat:.4f}, {sim.lon:.4f})  |  "
+        f"Steps: {result['steps']}  Casualties: {result['casualties']}  "
+        f"Evacuated: {result['evacuated']}/{result['total_civilians']}",
+        fontsize=11, fontweight='bold'
+    )
+
+    # ── 1. Fuel / terrain map ──────────────────────────────────────────────
+    ax = axes[0, 0]
+    fuel_cmap = mcolors.ListedColormap([
+        '#4a7c59',   # 0 = no fuel / urban (dark green)
+        '#7fbf7f',   # 1 = light (shrub)
+        '#c8a96e',   # 2 = medium (mixed)
+        '#8b5a2b',   # 3 = heavy (forest)
+        '#3a5f8a',   # 4 = water (blue)
+        '#d3d3d3',   # 5 = road / impervious (grey)
+    ])
+    fuel_norm = mcolors.BoundaryNorm([0, 1, 2, 3, 4, 5, 6], fuel_cmap.N)
+    fuel_grid = getattr(env, 'fuel_grid', None)
+    if fuel_grid is not None:
+        im = ax.imshow(fuel_grid, cmap=fuel_cmap, norm=fuel_norm,
+                       origin='upper', interpolation='nearest')
+        legend_elements = [
+            Patch(facecolor='#4a7c59', label='No fuel / Urban'),
+            Patch(facecolor='#7fbf7f', label='Light (Shrub)'),
+            Patch(facecolor='#c8a96e', label='Medium (Mixed)'),
+            Patch(facecolor='#8b5a2b', label='Heavy (Forest)'),
+            Patch(facecolor='#3a5f8a', label='Water'),
+            Patch(facecolor='#d3d3d3', label='Road'),
+        ]
+        ax.legend(handles=legend_elements, loc='lower right',
+                  fontsize=6, framealpha=0.7)
+    ax.set_title('Terrain / Fuel Type', fontsize=10)
+    ax.axis('off')
+
+    # ── 2. Ignition risk grid ──────────────────────────────────────────────
+    ax = axes[0, 1]
+    risk_grid = getattr(env, 'ignition_risk_grid', None)
+    if risk_grid is not None and risk_grid.max() > 0:
+        im2 = ax.imshow(risk_grid, cmap='YlOrRd', vmin=0, vmax=1,
+                        origin='upper', interpolation='bilinear')
+        fig.colorbar(im2, ax=ax, fraction=0.046, pad=0.04,
+                     label='Ignition Risk [0-1]')
+        fwi = env.fwi_data.get('fwi', 0.0) if hasattr(env, 'fwi_data') else 0.0
+        risk_level = env.fwi_data.get('risk_level', 'N/A') if hasattr(env, 'fwi_data') else 'N/A'
+        ax.set_title(f'Pre-Ignition Risk Grid  (FWI={fwi:.1f} — {risk_level})',
+                     fontsize=10)
+    else:
+        ax.text(0.5, 0.5, 'Risk grid not computed\n(RiskMonitor agent inactive)',
+                ha='center', va='center', transform=ax.transAxes, fontsize=9)
+        ax.set_title('Pre-Ignition Risk Grid', fontsize=10)
+    ax.axis('off')
+
+    # ── 3. Final fire state ────────────────────────────────────────────────
+    ax = axes[1, 0]
+    fire_state = getattr(env, 'fire_grid', None)
+    if fire_state is not None:
+        fire_cmap = mcolors.ListedColormap(['#2c7bb6', '#fdae61', '#d7191c'])
+        fire_norm = mcolors.BoundaryNorm([0, 1, 2, 3], fire_cmap.N)
+        ax.imshow(fire_state, cmap=fire_cmap, norm=fire_norm,
+                  origin='upper', interpolation='nearest')
+        fire_legend = [
+            Patch(facecolor='#2c7bb6', label='Unburned'),
+            Patch(facecolor='#fdae61', label='Burning'),
+            Patch(facecolor='#d7191c', label='Burned out'),
+        ]
+        ax.legend(handles=fire_legend, loc='lower right',
+                  fontsize=7, framealpha=0.7)
+    ax.set_title('Final Fire State', fontsize=10)
+    ax.axis('off')
+
+    # ── 4. FIRMS historical hotspot density ────────────────────────────────
+    ax = axes[1, 1]
+    firms_density = getattr(env, 'firms_density', None)
+    if firms_density is not None and firms_density.max() > 0:
+        im4 = ax.imshow(firms_density, cmap='hot_r', vmin=0, vmax=1,
+                        origin='upper', interpolation='bilinear')
+        fig.colorbar(im4, ax=ax, fraction=0.046, pad=0.04,
+                     label='Historical Ignition Density')
+        ax.set_title('NASA FIRMS Historical Hotspot Density (7d)', fontsize=10)
+    else:
+        ax.text(0.5, 0.5, 'No historical fire data\n(FIRMS: 0 hotspots)',
+                ha='center', va='center', transform=ax.transAxes, fontsize=9)
+        ax.set_title('NASA FIRMS Historical Hotspot Density', fontsize=10)
+    ax.axis('off')
+
+    fig.tight_layout()
+    fig.savefig(out_path, dpi=150, bbox_inches='tight')
+    plt.close(fig)
+    return out_path
+
+
 def main():
     """Main entry point with CLI argument parsing"""
     parser = argparse.ArgumentParser(
@@ -211,11 +341,17 @@ Examples:
     parser.add_argument('--fire-lon', type=float, nargs='+', metavar='LON',
                        help='Longitude(s) of real fire ignition point(s)')
 
+    # Agent counts
+    parser.add_argument('--ambulances', type=int, default=None,
+                       help='Number of ambulance agents (default: from config)')
+
     # Mode selection
     parser.add_argument('--batch', type=int, metavar='N',
                        help='Run N Monte Carlo experiments (batch mode)')
     parser.add_argument('--output', type=str, default='results.csv',
                        help='Output CSV file for batch mode (default: results.csv)')
+    parser.add_argument('--visualize', action='store_true',
+                       help='Save PNG visualization of risk grid and fire spread after simulation')
 
     args = parser.parse_args()
 
@@ -227,6 +363,11 @@ Examples:
             sys.exit(1)
         fire_locations = list(zip(args.fire_lat, args.fire_lon))
         print(f"  🔥 Using {len(fire_locations)} real fire location(s) from CLI")
+
+    # Build config overrides from CLI flags
+    cli_overrides = {}
+    if args.ambulances is not None:
+        cli_overrides['NUM_AMBULANCES'] = args.ambulances
 
     # Print header
     print("\n" + "=" * 70)
@@ -243,7 +384,8 @@ Examples:
                 radius=args.radius,
                 num_runs=args.batch,
                 output_file=args.output,
-                fire_locations=fire_locations
+                fire_locations=fire_locations,
+                config_overrides=cli_overrides,
             )
 
             # Print statistics
@@ -259,7 +401,8 @@ Examples:
                 lat=args.lat,
                 lon=args.lon,
                 radius=args.radius,
-                fire_locations=fire_locations
+                fire_locations=fire_locations,
+                config_overrides=cli_overrides,
             )
 
             # Print single-run results
@@ -280,6 +423,10 @@ Examples:
             recon = result.get('reconsideration_log', [])
             print(f"  Reconsideration Events:   {len(recon)}")
             print("=" * 70)
+
+            if getattr(args, 'visualize', False):
+                out_path = save_visualization(sim, result)
+                print(f"\n  📊 Visualization saved to: {out_path}")
 
     except KeyboardInterrupt:
         print("\n\n⚠️  Simulation interrupted by user")
