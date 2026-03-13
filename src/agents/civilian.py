@@ -41,6 +41,14 @@ from ..config import (
     AQI_SPEED_PENALTY,
     CIVILIAN_INJURY_THRESHOLD,
     CIVILIAN_SMOKE_PANIC_SCALE,
+    # Ablation B: when True, skip the three-state cognitive machine entirely.
+    # All civilians remain rational (panic = 0) and move at full speed to safety.
+    # Demonstrates how much the panic model (Cova & Johnson 2002) changes
+    # evacuation success rate relative to the idealized rational-agent baseline.
+    #   Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of neighborhood
+    #   evacuations in the urban-wildland interface." Environment and Planning A,
+    #   34(12), pp. 2211–2230.
+    DISABLE_PANIC,
 )
 
 
@@ -346,6 +354,19 @@ class CivilianAgent(Agent):
 
         Panic Equation:
         Panic(t) = Panic(t-1) + α × (1/d_fire) + β × (family_separated) - decay
+
+        When DISABLE_PANIC=True (Ablation B), this method is a no-op: panic
+        stays at 0 and the cognitive state remains rational throughout.
+        Comparing results with/without this model quantifies the contribution
+        of the three-state cognitive machine to evacuation outcomes:
+          Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of neighborhood
+          evacuations in the urban-wildland interface." Environment and
+          Planning A, 34(12), pp. 2211–2230.
+        """
+        # Ablation B: rational-agent baseline — skip panic dynamics entirely
+        if DISABLE_PANIC:
+            self.panic_level = 0.0
+            return
 
         Components:
         - α × (1/d_fire): Inverse relationship with fire distance

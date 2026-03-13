@@ -476,6 +476,32 @@ AQI_PANIC_WEIGHT  = 0.02   # Max +0.02/step at AQI=500 (~10 steps to add 0.2 pan
 AQI_SPEED_PENALTY = 0.30   # multiply free-flow speed by (1 - AQI_SPEED_PENALTY × aqi/500)
 
 # =============================================================================
+# ABLATION FLAGS  (Grimm et al. 2020 ODD §"Design concepts / Interaction")
+# =============================================================================
+# These flags disable specific architectural components for controlled ablation
+# experiments.  Setting one flag to True produces a reduced model that can be
+# compared statistically against the full model to isolate the contribution of
+# each component.
+#
+# Ablation methodology follows:
+#   Grimm, V. et al. (2020). "The ODD Protocol for Describing Agent-Based and
+#   Other Simulation Models: A Second Update to Improve Clarity, Replication,
+#   and Structural Realism." JASSS 23(2):7.
+#   DOI: 10.18564/jasss.4259
+#   [ODD "Design concepts" section requires documenting which sub-models can
+#   be switched off to test their individual contribution to emergent outcomes.]
+#
+# Ablation A — DISABLE_CNP:
+#   Replace Contract Net Protocol bidding (Smith 1980) with random assignment.
+#   Demonstrates how much CNP coordination improves suppression / rescue outcomes.
+# Ablation B — DISABLE_PANIC:
+#   Remove the three-state cognitive machine (Cova & Johnson 2002).
+#   All civilians stay rational (panic = 0) throughout.  Shows how panic-driven
+#   herding and gridlock affect evacuation success rate.
+DISABLE_CNP   = False   # True → random task assignment instead of CNP bidding
+DISABLE_PANIC = False   # True → civilians always rational, no panic model
+
+# =============================================================================
 # CONFIGURATION VALIDATION
 # =============================================================================
 # Validate critical parameters to prevent division by zero and invalid configs

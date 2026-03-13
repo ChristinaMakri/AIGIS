@@ -15,6 +15,14 @@ import pandas as pd
 from pathlib import Path
 from typing import Dict, List, Any
 import sys
+# scipy.stats used for 95% CI (t-distribution) and Mann-Whitney U test.
+# Statistical methods follow:
+#   Grimm, V. et al. (2020). "The ODD Protocol for Describing Agent-Based and
+#   Other Simulation Models: A Second Update." JASSS 23(2):7.
+#   [Recommends reporting ensemble statistics with confidence intervals.]
+#   Mann-Whitney U is used (non-parametric) because mortality_rate is a
+#   bounded [0,1] variable that may not be normally distributed across runs.
+from scipy import stats as _stats
 
 from src.simulation import AIGISSimulation
 from src.config import *
@@ -212,24 +220,55 @@ def run_monte_carlo(lat: float, lon: float, radius: float,
     return df
 
 
-def print_statistics(df: pd.DataFrame) -> None:
+def _confidence_interval_95(series: pd.Series):
+    """
+    Compute 95% t-distribution confidence interval for a sample mean.
+
+    Uses scipy.stats.t.interval (two-tailed, alpha=0.05).
+    Appropriate for small samples (n < 30) where z-interval would
+    underestimate uncertainty.  For large n the t- and z-intervals converge.
+
+    Reference:
+      Field, A. (2013). Discovering Statistics Using IBM SPSS Statistics.
+      SAGE Publications. (standard parametric CI methodology)
+    """
+    n = len(series.dropna())
+    if n < 2:
+        return float('nan'), float('nan')
+    lo, hi = _stats.t.interval(0.95, df=n - 1,
+                                loc=series.mean(), scale=_stats.sem(series))
+    return lo, hi
+
+
+def print_statistics(df: pd.DataFrame,
+                     compare_df: pd.DataFrame = None,
+                     compare_label: str = "Comparison") -> None:
     """
     Print summary statistics from Monte Carlo results.
 
     Calculates and displays:
-    - Mean ± Standard Deviation (measure of central tendency and spread)
-    - Min and Max (range of outcomes)
+    - Mean ± Standard Deviation
+    - 95% confidence interval (t-distribution)
+    - Min / Max range
+    - If compare_df supplied: Mann-Whitney U test p-value for each metric
 
-    Statistical Interpretation:
-    - Low std dev: Consistent outcomes across runs
-    - High std dev: High variability (sensitive to random factors)
-    - Range (max-min): Worst-case vs best-case scenarios
+    Statistical framework:
+      Grimm et al. (2020) ODD Protocol (JASSS 23(2):7) recommends reporting
+      ensemble statistics with confidence intervals for stochastic ABMs.
+
+      Mann-Whitney U (non-parametric) is used for comparisons because
+      mortality_rate is bounded [0,1] and may violate normality assumptions.
+        Mann, H.B. & Whitney, D.R. (1947). "On a test of whether one of two
+        random variables is stochastically larger than the other."
+        Annals of Mathematical Statistics, 18(1), pp. 50–60.
 
     Args:
-        df: DataFrame with Monte Carlo results (from run_monte_carlo)
+        df:            Primary Monte Carlo results DataFrame
+        compare_df:    Optional second DataFrame for statistical comparison
+        compare_label: Label for the comparison condition
     """
     print("\n" + "=" * 70)
-    print("📊 MONTE CARLO SUMMARY STATISTICS")
+    print("MONTE CARLO SUMMARY STATISTICS")
     print("=" * 70)
 
     # Key metrics
@@ -246,25 +285,42 @@ def print_statistics(df: pd.DataFrame) -> None:
     ]
 
     for col, label in metrics:
-        if col in df.columns:
-            mean_val = df[col].mean()
-            std_val = df[col].std()
-            min_val = df[col].min()
-            max_val = df[col].max()
+        if col not in df.columns:
+            continue
+        mean_val = df[col].mean()
+        std_val  = df[col].std()
+        min_val  = df[col].min()
+        max_val  = df[col].max()
+        ci_lo, ci_hi = _confidence_interval_95(df[col])
 
-            # Format based on metric type
-            if 'rate' in col:
-                print(f"\n{label}:")
-                print(f"  Mean: {mean_val:.2%} ± {std_val:.2%}")
-                print(f"  Range: [{min_val:.2%}, {max_val:.2%}]")
-            elif col in ['avg_panic_level', 'max_panic_level']:
-                print(f"\n{label}:")
-                print(f"  Mean: {mean_val:.3f} ± {std_val:.3f}")
-                print(f"  Range: [{min_val:.3f}, {max_val:.3f}]")
-            else:
-                print(f"\n{label}:")
-                print(f"  Mean: {mean_val:.2f} ± {std_val:.2f}")
-                print(f"  Range: [{int(min_val)}, {int(max_val)}]")
+        print(f"\n{label}:")
+        if 'rate' in col:
+            print(f"  Mean: {mean_val:.2%} ± {std_val:.2%}")
+            print(f"  95% CI: [{ci_lo:.2%}, {ci_hi:.2%}]")
+            print(f"  Range: [{min_val:.2%}, {max_val:.2%}]")
+        elif col in ['avg_panic_level', 'max_panic_level']:
+            print(f"  Mean: {mean_val:.3f} ± {std_val:.3f}")
+            print(f"  95% CI: [{ci_lo:.3f}, {ci_hi:.3f}]")
+            print(f"  Range: [{min_val:.3f}, {max_val:.3f}]")
+        else:
+            print(f"  Mean: {mean_val:.2f} ± {std_val:.2f}")
+            print(f"  95% CI: [{ci_lo:.2f}, {ci_hi:.2f}]")
+            print(f"  Range: [{int(min_val)}, {int(max_val)}]")
+
+        # Mann-Whitney U comparison (non-parametric, no normality assumption)
+        if compare_df is not None and col in compare_df.columns:
+            try:
+                u_stat, p_val = _stats.mannwhitneyu(
+                    df[col].dropna(),
+                    compare_df[col].dropna(),
+                    alternative='two-sided',
+                )
+                sig = "***" if p_val < 0.001 else "**" if p_val < 0.01 \
+                    else "*" if p_val < 0.05 else "ns"
+                print(f"  vs {compare_label}: U={u_stat:.0f}, "
+                      f"p={p_val:.4f} {sig}")
+            except Exception:
+                pass
 
     print("\n" + "=" * 70)
 

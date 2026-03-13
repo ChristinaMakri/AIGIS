@@ -44,6 +44,10 @@ from ..config import (
     MAX_STEPS,
     WIND_SPEED,
     RESCUER_SAFETY_THRESHOLD,
+    # Ablation A: when True, replace CNP bidding with random assignment.
+    # Isolates the contribution of Smith (1980) Contract Net Protocol to
+    # suppression and rescue outcomes.  See config.py DISABLE_CNP comment.
+    DISABLE_CNP,
 )
 
 # ML integration
@@ -452,17 +456,29 @@ class CommanderAgent(Agent):
             self._reevaluate_strategy()
             self.last_evaluation_step = current_step
 
-        # Evaluate pending rescue proposals (Contract Net Protocol)
+        # Evaluate pending rescue proposals.
+        # Full model: Contract Net Protocol — best-utility bid wins
+        #   (Smith 1980 — "The contract net protocol", IEEE Trans. Computers C-29(12)).
+        # Ablation A (DISABLE_CNP=True): random assignment — pick first proposal,
+        #   ignoring cost/ETA.  Used to quantify CNP's contribution to outcome quality.
         for cfp_id, proposals in list(self.pending_proposals.items()):
             if proposals:
-                self._select_best_proposal(cfp_id, proposals)
+                if DISABLE_CNP:
+                    self._assign_random_proposal(cfp_id, proposals,
+                                                  self.active_missions)
+                else:
+                    self._select_best_proposal(cfp_id, proposals)
             else:
                 del self.pending_proposals[cfp_id]
 
-        # Evaluate pending ambulance proposals
+        # Evaluate pending ambulance proposals (same CNP / random split)
         for cfp_id, proposals in list(self.ambulance_proposals.items()):
             if proposals:
-                self._select_best_ambulance_proposal(cfp_id, proposals)
+                if DISABLE_CNP:
+                    self._assign_random_proposal(cfp_id, proposals,
+                                                  self.ambulance_missions)
+                else:
+                    self._select_best_ambulance_proposal(cfp_id, proposals)
             else:
                 del self.ambulance_proposals[cfp_id]
 
@@ -560,6 +576,54 @@ class CommanderAgent(Agent):
                 self._select_best_firefighter_proposal(cfp_id, proposals)
             else:
                 del self.firefighter_proposals[cfp_id]
+
+    def _assign_random_proposal(self, cfp_id: str, proposals: List[Message],
+                                 mission_dict: dict) -> None:
+        """
+        Ablation A — random task assignment (DISABLE_CNP=True).
+
+        Accepts the FIRST proposal received instead of evaluating bid cost/ETA.
+        All other proposals are rejected.  This baseline replaces:
+
+          Smith, R.G. (1980). "The contract net protocol: High-level
+          communication and control in a distributed problem solver."
+          IEEE Transactions on Computers, C-29(12), pp. 1104–1113.
+
+        Comparing full-CNP vs random-assignment results quantifies how much
+        Smith's bidding mechanism improves suppression/rescue outcomes (ablation
+        methodology per Grimm et al. 2020 ODD, design-concepts section).
+        """
+        winner = proposals[0]
+        accept = Message(
+            sender=self.agent_id,
+            receiver=winner.sender,
+            performative="ACCEPT_PROPOSAL",
+            content={
+                'mission_id': cfp_id,
+                'target': winner.content.get('target'),
+                'target_grid': winner.content.get('target_grid'),
+            },
+            conversation_id=cfp_id,
+        )
+        self.send_message(accept)
+        mission_dict[cfp_id] = {
+            'agent': winner.sender,
+            'target': winner.content.get('target'),
+        }
+        for proposal in proposals[1:]:
+            reject = Message(
+                sender=self.agent_id,
+                receiver=proposal.sender,
+                performative="REJECT_PROPOSAL",
+                content={'mission_id': cfp_id},
+                conversation_id=cfp_id,
+            )
+            self.send_message(reject)
+        # Clear processed set (rescue proposals keyed in pending_proposals)
+        for store in (self.pending_proposals, self.ambulance_proposals):
+            if cfp_id in store:
+                del store[cfp_id]
+                break
 
     def _reevaluate_strategy(self) -> None:
         """
