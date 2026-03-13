@@ -36,26 +36,24 @@ docker-compose up
 # Build the image
 docker build -t aigis:latest .
 
-# Run the simulation
+# Run headless simulation
 docker run --rm -v "$(pwd)/output:/app/output" aigis:latest
+
+# Run with real-time web dashboard (expose port 5000 to host)
+docker run --rm -p 5000:5000 -v "$(pwd)/output:/app/output" aigis:latest --web
 ```
+
+After starting with `--web`, open `http://localhost:5000` in your browser to see the live 7-panel Plotly.js dashboard.
 
 ## Output
 
-When running in Docker (headless mode), the simulation:
-- Saves snapshots every 10 steps to `output/step_XXXX.png`
-- Saves the final state to `output/final_state.png`
-- Prints progress to console
+When running in Docker (headless mode), the simulation prints progress to console and exports results. With `--dashboard`:
+- Saves `aigis_dashboard.png` (7-panel overview)
+- Batch mode saves `aigis_batch_summary.png`
 
-Example output structure:
-```
-output/
-├── step_0000.png
-├── step_0010.png
-├── step_0020.png
-├── ...
-└── final_state.png
-```
+With `--web`:
+- Serves real-time dashboard at `http://localhost:5000`
+- Full simulation history is replayed to any browser that connects during or after the run
 
 ## Configuration
 
@@ -75,9 +73,19 @@ MAX_STEPS = 500
 
 ## Advanced Usage
 
+### Web Dashboard in Docker
+
+To access the real-time browser dashboard from the host machine:
+
+```bash
+docker run --rm -p 5000:5000 aigis:latest --web --web-port 5000
+```
+
+Then open `http://localhost:5000` in your browser. The `--web-port` flag must match the `-p` host mapping.
+
 ### With X11 Forwarding (Linux only)
 
-For real-time interactive visualization on Linux:
+For the static PNG dashboard on Linux (if you need headless PNG output with X11):
 
 1. Allow X11 connections:
 ```bash
@@ -170,5 +178,5 @@ rm -rf output/*
 
 - First run will take longer (downloading dependencies)
 - Subsequent runs are faster (Docker caching)
-- Simulation is deterministic with same random seed
+- Monte Carlo batch runs use `RANDOM_SEED = None` for stochastic variance across runs
 - All computation is local - no cloud services used

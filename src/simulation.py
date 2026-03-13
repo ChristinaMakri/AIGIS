@@ -622,6 +622,7 @@ class AIGISSimulation:
     def count_evacuated(self) -> int:
         """Count civilians that reached safe zones"""
         count = 0
+        h, w = self.environment.grid_shape
         for civilian in self.agents['civilians']:
             if civilian.is_evacuated:
                 count += 1
@@ -629,9 +630,19 @@ class AIGISSimulation:
             if not civilian.is_active:
                 continue
 
+            # Road-network safe node check
             if civilian.current_node is not None:
-                # Check if at a safe node
                 if self.environment.is_safe_node(civilian.current_node):
+                    civilian.is_evacuated = True
+                    civilian.is_active = False
+                    count += 1
+                    continue
+
+            # Grid-perimeter check: civilians using the perimeter fallback
+            # (_move_toward_perimeter) are evacuated when they reach any map edge.
+            if civilian.grid_position is not None:
+                r, c = civilian.grid_position
+                if r == 0 or r == h - 1 or c == 0 or c == w - 1:
                     civilian.is_evacuated = True
                     civilian.is_active = False
                     count += 1

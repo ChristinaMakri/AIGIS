@@ -212,6 +212,14 @@ if smoke_exposure >= threshold:
     halt movement
 ```
 
+**Gridlock bypass**: when Greenshields speed drops to ≤ 0.1 for 3 consecutive steps, civilian bypasses the speed gate and calls `_move_toward_perimeter()` directly, breaking out of road-network density jams.
+
+**`_move_toward_perimeter()`**: moves `max(1, int(V_free))` grid cells per call toward the nearest map edge. Multi-cell movement ensures gridlocked civilians escape the centre within a bounded number of steps.
+
+**Trapped casualty detection**: if `_move_toward_perimeter()` makes zero grid progress for 30 consecutive calls (civilian is enclosed by OSM building footprints with no passable exit), the civilian is marked `is_injured=True, is_active=False` — a physically realistic casualty outcome.
+
+**A* pathfinding fallback**: if `find_nearest_safe_node()` returns `None` (disconnected road-network island), the civilian immediately switches to grid-space perimeter movement rather than silently skipping navigation.
+
 **Herding safety**: if crowd direction leads to burning cell, falls back to `_move_to_safety()`.
 
 **Social Force**: inverse-distance-weighted average of nearby agents' `last_movement` vectors.
@@ -429,6 +437,49 @@ W, H = grid dimensions; R = detection radius; E, V = OSM graph edges/vertices
 **Claimed fire cells**: `environment.claimed_fire_cells` set prevents multiple firefighters targeting the same burning cell in the same step. Reset each step.
 
 **Message routing by string**: `_route_messages()` dispatches in O(1) for named groups (analyst, commander, ambulances, firefighters, rescuers, broadcast) before falling back to linear scan for direct agent IDs.
+
+---
+
+## 7. Web Dashboard
+
+### Architecture
+
+```
+Simulation thread  →  WebDashboard.update()  →  _history list + live queues
+                                                          ↓
+Flask SSE endpoint (/stream)  →  Browser EventSource  →  Plotly.js panels
+```
+
+The `WebDashboard` class (src/web_dashboard.py) runs a Flask dev server on a daemon thread while the simulation loop runs on the main thread. Every `DASHBOARD_UPDATE_INTERVAL` steps the simulation calls `update(sim)`, which:
+
+1. Appends serialised metrics to `sim._dashboard_history` (steps, evac, casualties, fire cells, AQI, smoke-injured, commander phase)
+2. Calls `_snapshot(sim)` — builds a compact JSON payload including downsampled fire/smoke grids, agent positions, and all history arrays
+3. Appends the SSE message to `_history` (for replay) and puts it into all live subscriber queues via `_broadcast()`
+
+### SSE Replay
+
+All snapshots are stored in `_history`. When a browser connects:
+- It immediately receives the full history replayed at 30 ms per frame
+- Then switches to live streaming for remaining updates
+- This ensures a browser opened after simulation completion still sees the full playback
+
+### Frontend Panels (src/templates/index.html)
+
+Uses Plotly.js via CDN. Seven panels match the matplotlib dashboard layout:
+
+| Panel | Type | Reference |
+|-------|------|-----------|
+| Fire Grid + Agents + Smoke | Heatmap + scatter overlay | Rothermel 1972 |
+| Evacuation Timeline | Area chart (evacuated vs casualties) | Wolshon 2006 |
+| Panic Distribution | Histogram with threshold lines | Cova & Johnson 2002 |
+| Fire Spread Metrics | Stacked area (burning + burnt cells) | Rothermel 1972 |
+| AQI & Smoke Injuries | Dual-axis line chart | Inness 2019 |
+| Commander Phase Strip | Highlighted segment + sparkline history | Rao & Georgeff 1995 |
+| Firefighter Resources | Per-unit water gauges + CNP refusal counter | Smith 1980 |
+
+### Grid Transmission
+
+The 200×200 fire and smoke grids are downsampled by factor 4 before JSON serialisation (→ 50×50), keeping payload size manageable while preserving visual fidelity.
 
 ---
 

@@ -9,6 +9,7 @@ CLI Interface supporting:
 - Research-ready: exports CSV results for statistical analysis
 """
 import argparse
+import time
 import numpy as np
 import pandas as pd
 from pathlib import Path
@@ -18,6 +19,81 @@ import sys
 from src.simulation import AIGISSimulation
 from src.config import *
 from src.parameter_adapter import ParameterAdapter
+
+
+def run_with_web_dashboard(lat: float, lon: float, radius: float,
+                           fire_locations: list = None,
+                           config_overrides: dict = None,
+                           port: int = 5000):
+    """
+    Run a single simulation with a real-time browser-based dashboard.
+
+    Starts a Flask server on http://localhost:<port>, opens the browser,
+    then runs the simulation loop pushing SSE updates every
+    DASHBOARD_UPDATE_INTERVAL steps.
+
+    Returns:
+        Tuple of (results dict, AIGISSimulation instance)
+    """
+    from src.web_dashboard import WebDashboard
+
+    sim = AIGISSimulation(lat, lon, radius, mode='gui',
+                          fire_locations=fire_locations,
+                          config_overrides=config_overrides or {})
+    dash = WebDashboard(port=port, auto_open=True)
+    dash.start_server()
+
+    while sim.step < MAX_STEPS and not sim.is_complete():
+        sim.run_step()
+        sim._print_step_summary()
+        if sim.step % DASHBOARD_UPDATE_INTERVAL == 0:
+            dash.update(sim)
+
+    sim._print_final_report()
+    dash.finalize(sim)
+
+    print("  Dashboard at http://localhost:{} — press Ctrl+C to stop".format(port))
+    try:
+        while True:
+            time.sleep(1)
+    except KeyboardInterrupt:
+        print("\n  Stopping web dashboard.")
+
+    return sim.get_results(), sim
+
+
+def run_with_dashboard(lat: float, lon: float, radius: float,
+                       fire_locations: list = None,
+                       config_overrides: dict = None,
+                       dashboard_path: str = 'aigis_dashboard.png'):
+    """
+    Run a single simulation with a live-updating dashboard.
+
+    Updates the 7-panel figure every DASHBOARD_UPDATE_INTERVAL steps and
+    writes the final PNG to dashboard_path.
+
+    Returns:
+        Tuple of (results dict, AIGISSimulation instance)
+    """
+    from src.dashboard import Dashboard
+
+    sim = AIGISSimulation(lat, lon, radius, mode='gui',
+                          fire_locations=fire_locations,
+                          config_overrides=config_overrides or {})
+    dash = Dashboard()
+
+    while sim.step < MAX_STEPS and not sim.is_complete():
+        sim.run_step()
+        sim._print_step_summary()
+        if sim.step % DASHBOARD_UPDATE_INTERVAL == 0:
+            dash.update(sim)
+
+    sim._print_final_report()
+    dash.finalize(sim)
+    dash.save(dashboard_path)
+    dash.close()
+
+    return sim.get_results(), sim
 
 
 def run_single_simulation(lat: float, lon: float, radius: float,
@@ -352,6 +428,14 @@ Examples:
                        help='Output CSV file for batch mode (default: results.csv)')
     parser.add_argument('--visualize', action='store_true',
                        help='Save PNG visualization of risk grid and fire spread after simulation')
+    parser.add_argument('--dashboard', action='store_true',
+                       help='Render 7-panel live dashboard PNG during simulation '
+                            '(single mode: aigis_dashboard.png; '
+                            'batch mode: aigis_batch_summary.png after all runs)')
+    parser.add_argument('--web', action='store_true',
+                       help='Start real-time browser dashboard at http://localhost:5000')
+    parser.add_argument('--web-port', type=int, default=5000, metavar='PORT',
+                       help='Port for the web dashboard server (default: 5000)')
 
     args = parser.parse_args()
 
@@ -391,19 +475,41 @@ Examples:
             # Print statistics
             print_statistics(df)
 
+            if getattr(args, 'dashboard', False):
+                from src.dashboard import Dashboard
+                Dashboard.batch_summary(df, 'aigis_batch_summary.png')
+
         else:
             # Single simulation mode
             print(f"Location: ({args.lat:.4f}, {args.lon:.4f})")
             print(f"Radius: {args.radius}m")
             print()
 
-            result, sim = run_single_simulation(
-                lat=args.lat,
-                lon=args.lon,
-                radius=args.radius,
-                fire_locations=fire_locations,
-                config_overrides=cli_overrides,
-            )
+            if getattr(args, 'web', False):
+                result, sim = run_with_web_dashboard(
+                    lat=args.lat,
+                    lon=args.lon,
+                    radius=args.radius,
+                    fire_locations=fire_locations,
+                    config_overrides=cli_overrides,
+                    port=args.web_port,
+                )
+            elif getattr(args, 'dashboard', False):
+                result, sim = run_with_dashboard(
+                    lat=args.lat,
+                    lon=args.lon,
+                    radius=args.radius,
+                    fire_locations=fire_locations,
+                    config_overrides=cli_overrides,
+                )
+            else:
+                result, sim = run_single_simulation(
+                    lat=args.lat,
+                    lon=args.lon,
+                    radius=args.radius,
+                    fire_locations=fire_locations,
+                    config_overrides=cli_overrides,
+                )
 
             # Print single-run results
             print("\n" + "=" * 70)
@@ -426,7 +532,7 @@ Examples:
 
             if getattr(args, 'visualize', False):
                 out_path = save_visualization(sim, result)
-                print(f"\n  📊 Visualization saved to: {out_path}")
+                print(f"\n  Visualization saved to: {out_path}")
 
     except KeyboardInterrupt:
         print("\n\n⚠️  Simulation interrupted by user")

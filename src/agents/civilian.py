@@ -196,6 +196,24 @@ class CivilianAgent(Agent):
         self.injury_threshold: float = CIVILIAN_INJURY_THRESHOLD
         self._injury_reported: bool = False  # Ensure we send only one INJURY_REPORT
 
+        # ===== PATHFINDING FALLBACK =====
+        # Counts consecutive A* failures.  After 3 failures the civilian
+        # switches to direct grid-space movement toward the nearest map edge
+        # (which is always a safe perimeter cell) — handles disconnected
+        # road-network islands in large-radius maps.
+        self._path_fail_count: int = 0
+
+        # ===== GRIDLOCK FALLBACK =====
+        # Counts consecutive steps where speed <= 0.1 (full gridlock).
+        # After 3 steps of gridlock the civilian bypasses the speed gate
+        # and uses grid-space perimeter movement to break out of the jam.
+        self._gridlock_steps: int = 0
+        # Track last known position to detect zero-progress (obstacle-enclosed).
+        # If position doesn't change for 30 steps of perimeter fallback, the
+        # civilian is physically trapped and is marked as a trapped casualty.
+        self._last_grid_position: Optional[Tuple[int, int]] = None
+        self._no_progress_steps: int = 0
+
     def perceive(self, environment) -> None:
         """
         BDI Perception: Update beliefs based on environment and messages.
@@ -584,9 +602,29 @@ class CivilianAgent(Agent):
 
         elif primary_intention == 'evacuate':
             # Goal-directed evacuation (rational or confused)
-            if self.current_speed > 0.1:  # Need minimum speed to move
+            if self.current_speed > 0.1:
+                self._gridlock_steps = 0
+                self._no_progress_steps = 0
+                self._last_grid_position = self.grid_position
                 self._move_to_safety(environment)
-            # else: gridlock - cannot move
+            else:
+                # Gridlock — count consecutive stuck steps.
+                # After 3 steps bypass the speed gate and move directly toward
+                # the map perimeter (breaks out of road-network jams).
+                self._gridlock_steps += 1
+                if self._gridlock_steps >= 3:
+                    pos_before = self.grid_position
+                    self._move_toward_perimeter(environment)
+                    # Detect zero-progress: obstacle-enclosed pocket with no exit.
+                    # After 30 consecutive steps of being completely unable to move,
+                    # mark the civilian as a trapped casualty (realistic outcome).
+                    if self.grid_position == pos_before:
+                        self._no_progress_steps += 1
+                        if self._no_progress_steps >= 30:
+                            self.is_injured = True
+                            self.is_active = False
+                    else:
+                        self._no_progress_steps = 0
 
     def _move_random(self, environment) -> None:
         """Move in a random direction (panic behavior) with current speed"""
@@ -607,6 +645,49 @@ class CivilianAgent(Agent):
         if environment.obstacle_grid[new_row, new_col] == 0 and environment.fire_grid[new_row, new_col] != 1:
             self.grid_position = (new_row, new_col)
             self.position = environment.grid_to_latlon(new_row, new_col)
+
+    def _move_toward_perimeter(self, environment) -> None:
+        """
+        Grid-space fallback for civilians on disconnected road-network islands.
+
+        Moves one step per call toward the nearest map edge.  The simulation's
+        count_evacuated() treats arrival at any perimeter cell as evacuation,
+        mirroring the USE_PERIMETER_AS_SAFE setting.
+        """
+        if self.grid_position is None:
+            return
+
+        h, w = environment.grid_shape
+
+        # Move up to v_free_flow cells per call so gridlocked civilians escape
+        # the centre in a reasonable number of steps rather than 1 cell/step.
+        steps_per_call = max(1, int(CIVILIAN_V_FREE_FLOW))
+        for _ in range(steps_per_call):
+            r, c = self.grid_position
+            dists = {
+                (-1,  0): r,
+                ( 1,  0): h - 1 - r,
+                ( 0, -1): c,
+                ( 0,  1): w - 1 - c,
+            }
+            dr, dc = min(dists, key=dists.get)
+            candidates = [(dr, dc), (-dc, dr), (dc, -dr), (-dr, -dc)]
+            moved = False
+            for step_r, step_c in candidates:
+                new_r = int(np.clip(r + step_r, 0, h - 1))
+                new_c = int(np.clip(c + step_c, 0, w - 1))
+                if (environment.obstacle_grid[new_r, new_c] == 0
+                        and environment.fire_grid[new_r, new_c] != 1):
+                    old_pos = self.grid_position
+                    self.grid_position = (new_r, new_c)
+                    self.position = environment.grid_to_latlon(new_r, new_c)
+                    self.last_movement = np.array(
+                        [new_c - old_pos[1], new_r - old_pos[0]], dtype=np.float32
+                    )
+                    moved = True
+                    break
+            if not moved:
+                break  # Completely surrounded — stop early
 
     def _follow_crowd(self, environment) -> None:
         """
@@ -679,6 +760,12 @@ class CivilianAgent(Agent):
                 self.safety_node = environment.find_nearest_safe_node(self.current_node)
                 self.current_path = []  # Force re-routing
 
+            # No reachable safe node on road network — bypass to grid perimeter
+            if self.safety_node is None:
+                self._path_fail_count += 1
+                self._move_toward_perimeter(environment)
+                return
+
             # STAGGERED PATHFINDING: Check if periodic recalculation is needed
             # Recalculate every N steps (with random offset) to adjust for traffic density
             self.steps_since_recalc += 1
@@ -688,7 +775,7 @@ class CivilianAgent(Agent):
 
             # Calculate path if needed
             # Reasons: 1) No path yet, 2) Periodic recalculation
-            if (not self.current_path or should_recalc_periodic) and self.safety_node:
+            if not self.current_path or should_recalc_periodic:
                 if should_recalc_periodic:
                     self.steps_since_recalc = 0  # Reset counter
 
@@ -699,8 +786,14 @@ class CivilianAgent(Agent):
                         self.safety_node,
                         weight='length'
                     )
+                    self._path_fail_count = 0  # Successful path — reset counter
                 except (nx.NetworkXNoPath, nx.NodeNotFound):
-                    # Try finding alternative safe node
+                    self._path_fail_count += 1
+                    if self._path_fail_count >= 3:
+                        # Road network disconnected — fall back to grid perimeter
+                        self._move_toward_perimeter(environment)
+                        return
+                    # Try a different safe node next step
                     self.safety_node = environment.find_nearest_safe_node(self.current_node)
                     self.current_path = []
 
@@ -725,7 +818,10 @@ class CivilianAgent(Agent):
                             weight='length'
                         )
                     except (nx.NetworkXNoPath, nx.NodeNotFound):
-                        # If no path exists, try new safe zone
+                        self._path_fail_count += 1
+                        if self._path_fail_count >= 3:
+                            self._move_toward_perimeter(environment)
+                            return
                         self.safety_node = environment.find_nearest_safe_node(self.current_node)
                         self.current_path = []
                     return  # Skip movement this step, recalculate next step
@@ -754,6 +850,8 @@ class CivilianAgent(Agent):
                 self.last_movement = np.zeros(2, dtype=np.float32)
 
         except (nx.NetworkXNoPath, nx.NodeNotFound, KeyError):
-            # Fallback to random movement if pathfinding fails
-            if self.current_speed > 0.5:
+            self._path_fail_count += 1
+            if self._path_fail_count >= 3:
+                self._move_toward_perimeter(environment)
+            elif self.current_speed > 0.5:
                 self._move_random(environment)

@@ -326,10 +326,21 @@ class AnalystAgent(Agent):
             self.ros_value = 0.0
             return
 
-        # Find closest fire to the map centre (population proxy).
-        # Using the analyst's own position was inaccurate if it spawned away from civilians.
-        center_lat = getattr(environment, 'lat_center', self.position[0])
-        center_lon = getattr(environment, 'lon_center', self.position[1])
+        # Find closest fire to the centroid of active civilians.
+        # Using the map centre was inaccurate when civilians cluster away from it
+        # (e.g., on a road network island).  Centroid gives a TTI that reflects
+        # actual proximity of fire to the people who still need to evacuate.
+        agents_ref = getattr(environment, 'agents', None)
+        active_civs = []
+        if agents_ref and 'civilians' in agents_ref:
+            active_civs = [c for c in agents_ref['civilians']
+                           if c.is_active and c.position is not None]
+        if active_civs:
+            center_lat = float(np.mean([c.position[0] for c in active_civs]))
+            center_lon = float(np.mean([c.position[1] for c in active_civs]))
+        else:
+            center_lat = getattr(environment, 'lat_center', self.position[0])
+            center_lon = getattr(environment, 'lon_center', self.position[1])
 
         min_distance = float('inf')
         closest_fire = None

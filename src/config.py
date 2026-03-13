@@ -10,7 +10,7 @@ import numpy as np
 
 # Random Seed (for reproducibility in Monte Carlo experiments)
 # Set to None for non-deterministic behavior
-RANDOM_SEED = 42
+RANDOM_SEED = None  # None = stochastic (required for meaningful Monte Carlo variance)
 
 # Simulation Duration
 MAX_STEPS = 500  # Maximum simulation steps (prevents infinite loops)
@@ -242,7 +242,7 @@ WIND_LOG_INTERVAL = 10  # Steps between wind direction change logs
 NUM_SENTINELS = 4
 NUM_RESCUERS = 3
 NUM_FIREFIGHTERS = 2  # Firefighting units for active suppression
-NUM_CIVILIANS = 20
+NUM_CIVILIANS = 60
 
 # =============================================================================
 # SENTINEL AGENT (Signal Detection Theory)

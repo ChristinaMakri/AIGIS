@@ -32,6 +32,8 @@ A Multi-Agent System (MAS) for wildfire disaster management simulation. AIGIS cr
 - Social Force herding model at high panic
 - 3-state cognitive machine: Rational -> Confused -> Herding
 - Cumulative smoke exposure injury model
+- Gridlock bypass: after 3 consecutive speed=0 steps, civilian switches to direct grid-space perimeter movement
+- Trapped casualty detection: after 30 steps of zero movement (obstacle-enclosed), civilian is marked as casualty
 
 ### Canadian Fire Weather Index (FWI)
 - Pre-ignition risk grid: FWI (40%) + fuel type (30%) + FIRMS density (20%) + slope (10%)
@@ -43,6 +45,12 @@ A Multi-Agent System (MAS) for wildfire disaster management simulation. AIGIS cr
 - NASA FIRMS VIIRS: historical ignition density (Schroeder et al. 2014)
 - OpenAQ: air quality index (PM2.5 proxy for smoke)
 - OSM EMS connector: hospital and ambulance station nodes
+
+### Real-Time Web Dashboard
+- Live browser dashboard at `http://localhost:5000` via Flask + Server-Sent Events
+- 7 Plotly.js panels: fire grid + agents, evacuation timeline, panic histogram, fire spread metrics, AQI/smoke injuries, Commander phase strip, firefighter water gauges
+- Full simulation history replayed to late-joining browser connections
+- `--web` flag; `--web-port` to override port
 
 ### Post-Simulation Report
 Printed automatically after each run:
@@ -128,7 +136,7 @@ Most complex agent. Accumulates smoke exposure from smoke_grid each step:
 pip install -r requirements.txt
 ```
 
-Required packages: numpy, scipy, pandas, osmnx, networkx, matplotlib, scikit-fuzzy, shapely, rasterio, geopandas, noise, requests, pytest
+Required packages: numpy, scipy, pandas, osmnx, networkx, matplotlib, scikit-fuzzy, shapely, rasterio, geopandas, noise, requests, pytest, flask
 
 ---
 
@@ -145,9 +153,15 @@ python main.py [OPTIONS]
 | `--lat` | 38.04 | Center latitude |
 | `--lon` | 23.80 | Center longitude |
 | `--radius` | 2000 | Map radius in meters |
+| `--fire-lat LAT [LAT ...]` | — | Latitude(s) of fire ignition point(s) |
+| `--fire-lon LON [LON ...]` | — | Longitude(s) of fire ignition point(s) |
 | `--batch N` | — | Run N Monte Carlo experiments |
 | `--output FILE` | results.csv | CSV output for batch mode |
-| `--mode {gui,headless}` | gui | Visualization mode |
+| `--dashboard` | off | Save 7-panel PNG dashboard (aigis_dashboard.png) |
+| `--web` | off | Start real-time browser dashboard at http://localhost:5000 |
+| `--web-port PORT` | 5000 | Port for the web dashboard server |
+| `--ambulances N` | from config | Override ambulance agent count |
+| `--visualize` | off | Save 4-panel PNG visualization after run |
 
 ### Examples
 
@@ -155,14 +169,21 @@ python main.py [OPTIONS]
 # Default location (Athens)
 python main.py
 
-# Custom location
-python main.py --lat 34.0522 --lon -118.2437 --radius 2500
+# Custom location with real fire ignition points
+python main.py --lat 37.918 --lon 23.957 --radius 3000 \
+  --fire-lat 37.920 37.915 --fire-lon 23.960 23.955
+
+# Real-time web dashboard (opens browser automatically)
+python main.py --web --lat 37.918 --lon 23.957 --radius 3000
+
+# Static PNG dashboard
+python main.py --dashboard --lat 37.918 --lon 23.957 --radius 3000
 
 # 50-run Monte Carlo experiment
 python main.py --batch 50 --output results.csv
 
-# Headless batch for HPC
-python main.py --batch 1000 --mode headless --output hpc_results.csv
+# Batch with PNG summary
+python main.py --batch 20 --dashboard --output results.csv
 ```
 
 ### Optional: ML and Real Data Setup
@@ -194,9 +215,12 @@ AIGIS/
     ├── environment.py             # LiveMapBuilder, smoke_grid, SRTM
     ├── fire_simulation.py         # Rothermel spread + smoke diffusion
     ├── simulation.py              # Main engine, metrics, final report
-    ├── dashboard.py               # 3-panel GUI dashboard
+    ├── dashboard.py               # 7-panel matplotlib PNG dashboard
+    ├── web_dashboard.py           # Real-time Flask/SSE web dashboard
     ├── ml_predictor.py            # XGBoost prediction module
     ├── parameter_adapter.py       # Monte Carlo parameter learning
+    ├── templates/
+    │   └── index.html             # Web dashboard frontend (Plotly.js)
     ├── data_connectors/
     │   ├── fwi_connector.py       # Open-Meteo FWI data
     │   ├── firms_connector.py     # NASA FIRMS ignition density
@@ -233,8 +257,8 @@ GRID_WIDTH = 200
 ```python
 NUM_SENTINELS = 4
 NUM_RESCUERS = 3
-NUM_FIREFIGHTERS = 3
-NUM_CIVILIANS = 20
+NUM_FIREFIGHTERS = 2
+NUM_CIVILIANS = 60
 NUM_AMBULANCES = 2
 NUM_RISK_MONITORS = 1
 ```
