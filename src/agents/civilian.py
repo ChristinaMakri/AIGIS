@@ -41,15 +41,10 @@ from ..config import (
     AQI_SPEED_PENALTY,
     CIVILIAN_INJURY_THRESHOLD,
     CIVILIAN_SMOKE_PANIC_SCALE,
-    # Ablation B: when True, skip the three-state cognitive machine entirely.
-    # All civilians remain rational (panic = 0) and move at full speed to safety.
-    # Demonstrates how much the panic model (Cova & Johnson 2002) changes
-    # evacuation success rate relative to the idealized rational-agent baseline.
-    #   Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of neighborhood
-    #   evacuations in the urban-wildland interface." Environment and Planning A,
-    #   34(12), pp. 2211–2230.
-    DISABLE_PANIC,
 )
+# Ablation B flag — read from module at call time so patching cfg.DISABLE_PANIC
+# in run_ablation.py takes effect without reloading the module.
+from .. import config as _cfg_module
 
 
 class CivilianAgent(Agent):
@@ -364,28 +359,11 @@ class CivilianAgent(Agent):
           Planning A, 34(12), pp. 2211–2230.
         """
         # Ablation B: rational-agent baseline — skip panic dynamics entirely
-        if DISABLE_PANIC:
+        # Read at call time so cfg.DISABLE_PANIC patch in run_ablation.py works.
+        if _cfg_module.DISABLE_PANIC:
             self.panic_level = 0.0
             return
 
-        Components:
-        - α × (1/d_fire): Inverse relationship with fire distance
-          - Closer fire causes exponential panic increase
-          - Example: d=1 → +0.05, d=2 → +0.025, d=10 → +0.005
-        - β × (family_separated): Constant penalty if family is separated
-          - Adds psychological stress factor
-        - decay: Gradual panic reduction when no fire visible
-          - Simulates calming down over time
-
-        Panic Range: [0.0, 1.0]
-        - 0.0: Completely calm
-        - 0.4: Rational threshold (below = optimal decision making)
-        - 0.7: Confused threshold (below = degraded decision making)
-        - 0.8+: Herding threshold (follows crowd, abandons planning)
-
-        Reference: Disaster psychology research shows proximity to threat
-        and family concerns are primary panic drivers.
-        """
         if self.fire_visible and self.fire_distance < float('inf'):
             # ===== FIRE PROXIMITY FACTOR =====
             panic_increase = CIVILIAN_PANIC_ALPHA * (1.0 / max(self.fire_distance, 0.5))

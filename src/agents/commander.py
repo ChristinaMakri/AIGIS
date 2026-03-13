@@ -44,11 +44,10 @@ from ..config import (
     MAX_STEPS,
     WIND_SPEED,
     RESCUER_SAFETY_THRESHOLD,
-    # Ablation A: when True, replace CNP bidding with random assignment.
-    # Isolates the contribution of Smith (1980) Contract Net Protocol to
-    # suppression and rescue outcomes.  See config.py DISABLE_CNP comment.
-    DISABLE_CNP,
 )
+# Ablation A flag — read from module at call time so patching cfg.DISABLE_CNP
+# in run_ablation.py takes effect without reloading the module.
+from .. import config as _cfg_module
 
 # ML integration
 try:
@@ -463,7 +462,7 @@ class CommanderAgent(Agent):
         #   ignoring cost/ETA.  Used to quantify CNP's contribution to outcome quality.
         for cfp_id, proposals in list(self.pending_proposals.items()):
             if proposals:
-                if DISABLE_CNP:
+                if _cfg_module.DISABLE_CNP:
                     self._assign_random_proposal(cfp_id, proposals,
                                                   self.active_missions)
                 else:
@@ -474,7 +473,7 @@ class CommanderAgent(Agent):
         # Evaluate pending ambulance proposals (same CNP / random split)
         for cfp_id, proposals in list(self.ambulance_proposals.items()):
             if proposals:
-                if DISABLE_CNP:
+                if _cfg_module.DISABLE_CNP:
                     self._assign_random_proposal(cfp_id, proposals,
                                                   self.ambulance_missions)
                 else:
