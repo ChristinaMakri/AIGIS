@@ -411,7 +411,16 @@ class LiveMapBuilder:
         lons = [data['x'] for _, data in graph.nodes(data=True)]
         lats = [data['y'] for _, data in graph.nodes(data=True)]
 
-        return (min(lons), min(lats), max(lons), max(lats))
+        min_lon, max_lon = min(lons), max(lons)
+        min_lat, max_lat = min(lats), max(lats)
+
+        # Guard against degenerate bounding box (all nodes on a single line)
+        if max_lat == min_lat or max_lon == min_lon:
+            lat, lon = self.center
+            offset = self.radius / 111320
+            return (lon - offset, lat - offset, lon + offset, lat + offset)
+
+        return (min_lon, min_lat, max_lon, max_lat)
 
     def _fetch_forests(self, bounds: Tuple[float, float, float, float]) -> list:
         """Fetch forest geometries from OSM"""
