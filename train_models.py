@@ -290,57 +290,69 @@ def generate_dataset(
     rng = np.random.default_rng(seed)
     records = []
 
-    for i in range(num_runs):
+    available_locs = list(range(len(TRAINING_LOCATIONS)))
+    i = 0
+    attempts = 0
+    max_attempts = num_runs * 3  # guard against infinite loop if all locations broken
+
+    while i < num_runs and attempts < max_attempts:
+        attempts += 1
         print(f'  Generating run {i + 1}/{num_runs}', end='\r', flush=True)
 
         overrides = _sample_overrides(rng)
-        loc = TRAINING_LOCATIONS[int(rng.integers(0, len(TRAINING_LOCATIONS)))]
+        loc_idx = int(rng.integers(0, len(TRAINING_LOCATIONS)))
+        loc = TRAINING_LOCATIONS[loc_idx]
 
-        with _quiet():
-            sim = AIGISSimulation(
-                lat=loc['lat'], lon=loc['lon'], radius=loc['radius'],
-                mode='batch', run_id=i,
-                config_overrides=overrides,
-                fire_locations=loc['fire_locations'],
-            )
+        try:
+            with _quiet():
+                sim = AIGISSimulation(
+                    lat=loc['lat'], lon=loc['lon'], radius=loc['radius'],
+                    mode='batch', run_id=i,
+                    config_overrides=overrides,
+                    fire_locations=loc['fire_locations'],
+                )
 
-        midpoint = MAX_STEPS // 2
+            midpoint = MAX_STEPS // 2
 
-        # Phase 1: run to midpoint and extract features
-        with _quiet():
-            while sim.step < midpoint and not sim.is_complete():
-                sim.run_step()
+            with _quiet():
+                while sim.step < midpoint and not sim.is_complete():
+                    sim.run_step()
 
-        predictor = RiskPredictor.__new__(RiskPredictor)
-        predictor.models    = {}
-        predictor.is_trained = False
-        state    = _extract_state(sim)
-        features = predictor._extract_features(state)
+            predictor = RiskPredictor.__new__(RiskPredictor)
+            predictor.models    = {}
+            predictor.is_trained = False
+            state    = _extract_state(sim)
+            features = predictor._extract_features(state)
 
-        # Phase 2: run to completion
-        with _quiet():
-            while sim.step < MAX_STEPS and not sim.is_complete():
-                sim.run_step()
+            with _quiet():
+                while sim.step < MAX_STEPS and not sim.is_complete():
+                    sim.run_step()
 
-        result     = sim.get_results()
-        casualties = result['casualties']
-        evacuated  = result['evacuated']
-        steps      = result['steps']
+            result     = sim.get_results()
+            casualties = result['casualties']
+            evacuated  = result['evacuated']
+            steps      = result['steps']
 
-        row = {f: v for f, v in zip(FEATURE_NAMES, features)}
-        row.update({
-            'run_id':            i,
-            'train_lat':         loc['lat'],
-            'train_lon':         loc['lon'],
-            'target_casualties': casualties,
-            'target_evacuated':  evacuated,
-            'target_steps':      steps,
-            # Store overrides for reference
-            **{f'param_{k}': v for k, v in overrides.items()},
-        })
-        records.append(row)
+            row = {f: v for f, v in zip(FEATURE_NAMES, features)}
+            row.update({
+                'run_id':            i,
+                'train_lat':         loc['lat'],
+                'train_lon':         loc['lon'],
+                'target_casualties': casualties,
+                'target_evacuated':  evacuated,
+                'target_steps':      steps,
+                **{f'param_{k}': v for k, v in overrides.items()},
+            })
+            records.append(row)
+            i += 1
+
+        except Exception as exc:
+            # Location produced a degenerate environment — skip and resample
+            print(f'\n  Skipping loc {loc["lat"]},{loc["lon"]}: {exc}', flush=True)
 
     print()
+    if len(records) < num_runs:
+        print(f'  WARNING: only {len(records)}/{num_runs} runs completed successfully')
     return pd.DataFrame(records)
 
 
