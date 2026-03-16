@@ -60,22 +60,27 @@ from src.config import MAX_STEPS
 # ---------------------------------------------------------------------------
 # Mati 2018 documented conditions (Lagouvardos et al. 2019)
 # ---------------------------------------------------------------------------
-MATI_LAT    = 37.918
-MATI_LON    = 23.957
+MATI_LAT    = 38.090   # Mati/Neos Voutzas, Attica — NE of Athens near Rafina
+MATI_LON    = 23.920
 MATI_RADIUS = 3000   # meters — covers the Mati coastal zone
 
 # Three distinct ignition points documented in the meteorological analysis
 # (Lagouvardos et al. 2019, Fig. 2 and supplemental data)
+# Fire ignited inland NE of the settlement and spread WNW toward the coast
+# driven by ESE winds (Lagouvardos et al. 2019).
 MATI_FIRE_LOCATIONS = [
-    (37.920, 23.960),  # Primary ignition — Kokkino Limanaki area
-    (37.915, 23.955),  # Secondary front
-    (37.910, 23.948),  # Tertiary spread toward coast
+    (38.097, 23.940),  # Primary ignition — inland NE above Kokkino Limanaki
+    (38.092, 23.932),  # Secondary front
+    (38.085, 23.925),  # Tertiary spread toward coast
 ]
 
-# Wind conditions from Lagouvardos et al. (2019): ESE ≈ 115°, 11 m/s mean
-# Converted to AIGIS config_overrides
+# Wind conditions from Lagouvardos et al. (2019): ESE ≈ 115°, 11 m/s mean.
+# AIGIS convention: WIND_INITIAL_DIRECTION is the direction wind is going TO
+# (not the meteorological FROM direction).
+# ESE wind = coming FROM 115° = going TOWARD 295° (WNW).
+# Fire spread toward the coast (WNW) consistent with 295° TO direction.
 MATI_CONFIG_OVERRIDES = {
-    'WIND_INITIAL_DIRECTION': 115.0,    # ESE — Lagouvardos et al. 2019
+    'WIND_INITIAL_DIRECTION': 295.0,    # Going WNW — ESE wind (Lagouvardos 2019)
     'WIND_SPEED': 11.0,                 # m/s mean at fire front (ibid.)
     'WIND_OSCILLATION_AMPLITUDE': 8.0,  # Moderate gusting documented
     'WIND_OSCILLATION_PERIOD': 30.0,

@@ -1,12 +1,13 @@
 """
 AIGIS — Ablation Study
 ======================
-Compares three conditions to isolate the contribution of the Contract Net
+Compares four conditions to isolate the contribution of the Contract Net
 Protocol (CNP) and the panic cognitive model:
 
-  Condition A — BASELINE:      CNP + panic model both active (default)
-  Condition B — DISABLE_CNP:   Random task assignment; panic model active
-  Condition C — DISABLE_PANIC: CNP active; rational-agent baseline (no panic)
+  Condition A — BASELINE:         CNP + panic model both active (default)
+  Condition B — DISABLE_CNP:      Random task assignment; panic model active
+  Condition C — DISABLE_PANIC:    CNP active; rational-agent baseline (no panic)
+  Condition D — NO COORDINATION:  Both CNP and panic disabled (null baseline)
 
 Academic grounding
 ------------------
@@ -73,9 +74,18 @@ BG, PANEL, FG = '#1a1a2e', '#16213e', '#e0e0e0'
 
 CONDITIONS = [
     # (label, DISABLE_CNP, DISABLE_PANIC, colour)
-    ('Baseline (CNP + Panic)',    False, False, '#ffd60a'),
-    ('No CNP (random assign)',    True,  False, '#ff006e'),
-    ('No Panic (rational agents)', False, True, '#06d6a0'),
+    ('Baseline (CNP + Panic)',      False, False, '#ffd60a'),
+    ('No CNP (random assign)',      True,  False, '#ff006e'),
+    ('No Panic (rational agents)',  False, True,  '#06d6a0'),
+    # Condition D — both components disabled: minimal-intelligence baseline.
+    # This null condition has no coordination protocol and no panic model,
+    # representing an uncoordinated random-assignment system with rational
+    # agents only.  Comparison against Baseline quantifies the combined
+    # contribution of CNP + panic-aware modelling — directly supporting the
+    # thesis claim that coordinated MAS outperforms uncoordinated response.
+    # Methodology: Wilensky & Rand (2015) §8.3 — multiple component removal
+    # produces a lower bound on system performance.
+    ('No Coordination (No CNP + No Panic)', True, True, '#8b5cf6'),
 ]
 
 
@@ -127,11 +137,11 @@ def _sig_stars(p: float) -> str:
 
 def run_ablation(
     num_runs: int = 30,
-    lat: float = 37.918, lon: float = 23.957, radius: int = 3000,
+    lat: float = 38.090, lon: float = 23.920, radius: int = 3000,
     output_file: str = 'ablation_results.csv',
 ) -> pd.DataFrame:
     """
-    Execute ablation study across three conditions (A=Baseline, B=No CNP, C=No Panic).
+    Execute ablation study across four conditions (A=Baseline, B=No CNP, C=No Panic, D=No Coordination).
 
     30 runs per condition follows Grimm et al. (2020) ODD Protocol minimum
     for characterising stochastic ABM output distributions.
@@ -205,6 +215,9 @@ Interpretation guide:
     → confirms CNP improves resource allocation efficiency (Smith 1980)
   Condition C (No Panic) vs. Baseline — significant decrease in mortality_rate
     → confirms panic model raises casualties, validating Cova & Johnson (2002)
+  Condition D (No Coordination) vs. Baseline — largest expected mortality gap
+    → lower bound on system performance; directly supports thesis claim that
+      coordinated MAS outperforms uncoordinated random-assignment response
   Non-significant results indicate the component has marginal impact under
     these simulation parameters.
 """)
@@ -219,9 +232,9 @@ def _plot_ablation(df: pd.DataFrame, out_path: str) -> None:
     n_metrics = len(metrics)
     colours = [c[3] for c in CONDITIONS]
     labels  = [c[0] for c in CONDITIONS]
-    short   = ['Baseline', 'No CNP', 'No Panic']
+    short   = ['Baseline', 'No CNP', 'No Panic', 'No Coord.']
 
-    fig = plt.figure(figsize=(5 * n_metrics, 5), facecolor=BG)
+    fig = plt.figure(figsize=(5 * n_metrics, 6), facecolor=BG)
     fig.suptitle(
         'Ablation Study  |  Wilensky & Rand (2015)  |  Mann-Whitney U  (Mann & Whitney 1947)',
         color=FG, fontsize=10, fontweight='bold'
@@ -273,8 +286,8 @@ def main():
     parser.add_argument('--runs',   type=int,   default=30,
                         help='Monte Carlo runs per condition (default: 30)')
     parser.add_argument('--output', type=str,   default='ablation_results.csv')
-    parser.add_argument('--lat',    type=float, default=37.918)
-    parser.add_argument('--lon',    type=float, default=23.957)
+    parser.add_argument('--lat',    type=float, default=38.090)
+    parser.add_argument('--lon',    type=float, default=23.920)
     parser.add_argument('--radius', type=int,   default=3000)
     args = parser.parse_args()
 

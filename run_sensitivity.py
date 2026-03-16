@@ -137,8 +137,8 @@ def _sensitivity_index(baseline_mean: float, varied_mean: float,
 
 def run_sensitivity(
     num_runs: int = 30,
-    lat:      float = 37.918,
-    lon:      float = 23.957,
+    lat:      float = 38.090,
+    lon:      float = 23.920,
     radius:   int   = 3000,
     output_file: str = 'sensitivity_results.csv',
 ) -> pd.DataFrame:
@@ -318,8 +318,8 @@ def main():
                         help='Monte Carlo runs per parameter value (default: 30)')
     parser.add_argument('--output', type=str,   default='sensitivity_results.csv',
                         help='Output CSV filename')
-    parser.add_argument('--lat',    type=float, default=37.918)
-    parser.add_argument('--lon',    type=float, default=23.957)
+    parser.add_argument('--lat',    type=float, default=38.090)
+    parser.add_argument('--lon',    type=float, default=23.920)
     parser.add_argument('--radius', type=int,   default=3000)
     args = parser.parse_args()
 
