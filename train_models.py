@@ -108,11 +108,54 @@ try:
 except ImportError:
     XGBOOST_AVAILABLE = False
 
+import sys
+
+import src.config as _cfg
+import src.fire_simulation as _fs_mod
+import src.simulation as _sim_mod
+import src.agents.sentinel as _sentinel_mod
+import src.agents.analyst as _analyst_mod
 from src.simulation import AIGISSimulation
 from src.config import MAX_STEPS
 from src.ml_predictor import RiskPredictor
 
 warnings.filterwarnings('ignore')
+
+# ---------------------------------------------------------------------------
+# Module-level parameter patching
+# ---------------------------------------------------------------------------
+# These parameters are imported via `from .config import X` into each module,
+# creating module-local bindings. Patching only src.config is NOT enough —
+# we must also patch the local binding in every module that caches the value.
+# ---------------------------------------------------------------------------
+_PATCH_TARGETS: dict[str, list] = {
+    'FIRE_SPREAD_PROB_BASE':      [_cfg, _fs_mod],
+    'ROTHERMEL_BASE_ROS':         [_cfg, _fs_mod, _analyst_mod],
+    'WIND_SPEED':                 [_cfg, _fs_mod, _analyst_mod],
+    'WIND_INITIAL_DIRECTION':     [_cfg, _fs_mod, _sentinel_mod, _analyst_mod],
+    'WIND_OSCILLATION_AMPLITUDE': [_cfg, _fs_mod, _sentinel_mod, _analyst_mod],
+    'NUM_CIVILIANS':              [_cfg, _sim_mod],
+}
+
+
+def _apply_overrides(overrides: dict) -> dict:
+    """
+    Patch all module-level bindings for each override parameter.
+    Returns a snapshot of original values for later reset.
+    """
+    snapshot = {}
+    for param, value in overrides.items():
+        for mod in _PATCH_TARGETS.get(param, [_cfg]):
+            if hasattr(mod, param):
+                snapshot[(id(mod), param)] = (mod, getattr(mod, param))
+                setattr(mod, param, value)
+    return snapshot
+
+
+def _reset_overrides(snapshot: dict) -> None:
+    """Restore all module-level bindings to their pre-override values."""
+    for (mod, param), original in snapshot.values():
+        setattr(mod, param, original)
 
 # ---------------------------------------------------------------------------
 # Feature names — must match ml_predictor._extract_features() order exactly
@@ -296,11 +339,11 @@ def generate_dataset(
         overrides = _sample_overrides(rng)
         loc = TRAINING_LOCATIONS[int(rng.integers(0, len(TRAINING_LOCATIONS)))]
 
+        snapshot = _apply_overrides(overrides)
         with _quiet():
             sim = AIGISSimulation(
                 lat=loc['lat'], lon=loc['lon'], radius=loc['radius'],
                 mode='batch', run_id=i,
-                config_overrides=overrides,
                 fire_locations=loc['fire_locations'],
             )
 
@@ -321,6 +364,8 @@ def generate_dataset(
                 sim.run_step()
 
         result     = sim.get_results()
+        _reset_overrides(snapshot)
+
         casualties = result['casualties']
         evacuated  = result['evacuated']
         steps      = result['steps']
