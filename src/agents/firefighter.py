@@ -12,6 +12,22 @@ import numpy as np
 from typing import Tuple, List, Optional, Dict
 from .base_agent import Agent
 from ..message import Message
+from .. import config as _cfg_module
+
+# RL policy (lazy-loaded on first use)
+_rl_policy = None
+
+def _get_rl_policy():
+    global _rl_policy
+    if _rl_policy is None:
+        import os, torch
+        from ..rl.ppo import PPOAgent
+        agent = PPOAgent('firefighter', global_state_dim=_cfg_module.RL_GLOBAL_STATE_DIM)
+        path = os.path.join(_cfg_module.RL_POLICY_DIR, 'firefighter.pt')
+        if os.path.exists(path):
+            agent.load(path)
+        _rl_policy = agent
+    return _rl_policy
 
 
 class FirefighterAgent(Agent):
@@ -113,10 +129,13 @@ class FirefighterAgent(Agent):
         self.suppression_strategy = None  # 'water', 'fire_line', 'backburn'
 
         # === CNP MISSION TRACKING ===
-        # mission_status: IDLE = no assignment; ASSIGNED = accepted CFP, moving to act;
-        #                 SUPPRESSING = actively executing suppression
-        self.current_mission: Optional[dict] = None  # {mission_id, target_grid, commander}
+        self.current_mission: Optional[dict] = None
         self.mission_status: str = "IDLE"
+
+        # === RL INTEGRATION ===
+        # Observation vector set by the MARL training loop each step.
+        # None → BDI fallback is used.
+        self._rl_obs: Optional[np.ndarray] = None
 
     def perceive(self, environment) -> None:
         """
@@ -209,17 +228,59 @@ class FirefighterAgent(Agent):
                     self.mission_status = "IDLE"
                     self.current_mission = None
 
+    # RL action index → suppression strategy string
+    _RL_ACTION_MAP = {
+        0: 'water_drop',
+        1: 'fire_line',
+        2: 'backburn',
+        3: 'patrol',
+        4: 'return_to_base',
+    }
+
+    def _get_bdi_valid_actions(self) -> list:
+        """
+        Return indices of actions that are safe under BDI safety rules.
+        Masks out physically impossible or BDI-unsafe actions before PPO argmax.
+
+        Sardina, S. & Thangarajah, J. (2011). "On the deployment of BDI agents
+        in the presence of learning algorithms." Proc. 22nd IJCAI, pp. 1810-1815.
+        Action masking enforces hard BDI constraints on RL-selected actions;
+        the RL policy optimises over the feasible sub-space only.
+
+        Actions: 0=water_drop, 1=fire_line, 2=backburn, 3=patrol, 4=return_to_base
+        """
+        all_actions = list(range(5))
+        invalid: set = set()
+
+        # No water remaining: cannot water_drop (0) or backburn (2)
+        if self.current_water < self.water_per_drop:
+            invalid.update([0, 2])
+
+        # No fire target identified: cannot attack (0=water_drop, 1=fire_line, 2=backburn)
+        if self.target_fire is None:
+            invalid.update([0, 1, 2])
+
+        # Currently refilling at base: can only wait to finish (only return_to_base = 4)
+        if self.is_refilling:
+            invalid.update([0, 1, 2, 3])
+
+        valid = [a for a in all_actions if a not in invalid]
+        return valid if valid else all_actions   # never fully block
+
     def decide(self) -> None:
         """
-        Choose suppression strategy using utility function.
-
-        Utility = w_threat × Threat + w_efficiency × Efficiency + w_coordination × Coordination
-
-        Strategies:
-        1. Water drop: High threat, close proximity
-        2. Fire line: Medium threat, predictable spread
-        3. Backburn: Low threat, time to prepare
+        Choose suppression strategy.
+        Uses trained PPO policy (Schulman et al. 2017) with BDI action masking
+        (Sardina & Thangarajah 2011) when obs is available; falls back to BDI
+        utility function (Rao & Georgeff 1995) pre-training.
         """
+        if self._rl_obs is not None:
+            valid   = self._get_bdi_valid_actions()
+            action  = _get_rl_policy().best_action_masked(self._rl_obs, valid)
+            self.suppression_strategy = self._RL_ACTION_MAP.get(action, 'patrol')
+            return
+
+        # ── BDI fallback (pre-training only) ──────────────────────────
         if self.is_refilling:
             self.suppression_strategy = 'refill'
             return
@@ -232,14 +293,11 @@ class FirefighterAgent(Agent):
             self.suppression_strategy = 'patrol'
             return
 
-        # Calculate utilities for each strategy
         utilities = {
             'water_drop': self._calculate_water_drop_utility(),
             'fire_line': self._calculate_fire_line_utility(),
             'backburn': self._calculate_backburn_utility()
         }
-
-        # Select best strategy
         self.suppression_strategy = max(utilities, key=utilities.get)
 
     def _calculate_water_drop_utility(self) -> float:

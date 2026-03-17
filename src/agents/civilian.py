@@ -166,6 +166,27 @@ class CivilianAgent(Agent):
         self.redirect_to_coast = False  # Shelter-in-place order (Phase 3)
         self.is_evacuated = False  # True once civilian reaches a safe zone
 
+        # ===== PRE-EVACUATION MILLING DELAY (Lindell & Perry 2012) =====
+        # Households spend time preparing before departing after an official
+        # evacuation order — packing, contacting family, seeking confirmation.
+        # This is called "milling" in the Protective Action Decision Model.
+        #
+        # Lindell, M.K. & Perry, R.W. (2012). "The Protective Action Decision
+        # Model: Theoretical modifications and additional evidence." Risk
+        # Analysis, 32(4), pp. 616-632.  DOI: 10.1111/j.1539-6924.2011.01647.x
+        # Table 3 — "Warning-issued to departure time" for commanded evacuation
+        # with official notification (siren/broadcast):
+        #   Median: 15.2 min  |  Range: 7-45 min
+        # Log-normal fit: μ = ln(182), σ = 0.60
+        #   (at 5 s/step → 15.2 min = 912 s / 5 = ~182 steps)
+        #   σ derived from 10th-90th percentile ratio ≈ e^(2×1.28×σ) ≈ 6
+        #   → σ ≈ 0.60  (Lindell & Perry 2012, Table 3 spread)
+        #
+        # Milling does NOT apply when fire is directly visible — immediate
+        # flight response overrides deliberation (Lindell & Perry 2012, p. 622).
+        self._milling_steps_remaining: int = 0
+        self._milling_delay_set: bool = False   # sample only once per warning
+
         # ===== SOCIAL BONDS (Psychology Factor) =====
         # 30% of civilians have family, adding panic when separated
         # Based on real disaster psychology: family separation increases irrational behavior
@@ -275,6 +296,16 @@ class CivilianAgent(Agent):
                     self.evacuation_ordered = True
                     self.panic_level = min(1.0, self.panic_level + 0.3)  # Significant panic increase
                     self.family_separated = False  # Mass evacuation: family assumed moving together
+                    # Sample milling delay once per warning — only if fire not
+                    # yet visible (visible fire triggers immediate flight response,
+                    # Lindell & Perry 2012, p. 622 "threat recognition override").
+                    if not self.fire_visible and not self._milling_delay_set:
+                        # Log-normal: μ=ln(182), σ=0.60 (Lindell & Perry 2012,
+                        # Table 3; 182 steps ≈ 15.2 min at 5 s/step)
+                        self._milling_steps_remaining = max(
+                            0, int(np.random.lognormal(mean=5.204, sigma=0.60))
+                        )
+                        self._milling_delay_set = True
 
                 # Shelter-in-Place (Phase 3): Too late to evacuate, seek nearest safe zone
                 elif msg_type == 'REDIRECT_TO_SAFE_ZONE':
@@ -492,6 +523,11 @@ class CivilianAgent(Agent):
 
         # Intention revision based on beliefs
         if 'evacuation_ordered' in self.beliefs or 'fire_nearby' in self.beliefs:
+            # Pre-evacuation milling delay (Lindell & Perry 2012, Table 3).
+            # Visible fire overrides delay (immediate flight response, ibid. p. 622).
+            if self._milling_steps_remaining > 0 and not self.fire_visible:
+                self._milling_steps_remaining -= 1
+                return   # civilian is still preparing — do not start evacuation yet
             if 'evacuate' not in self.intentions:
                 self.intentions.clear()
                 self.intentions.append('evacuate')

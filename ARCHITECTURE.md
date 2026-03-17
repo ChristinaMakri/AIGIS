@@ -79,9 +79,9 @@ No memory. Purely input-output. Four instances placed at map corners.
 
 ---
 
-### 2.3 Commander — BDI + Hybrid (ECT vs TTI, CNP Manager)
+### 2.3 Commander — BDI + PPO (ECT vs TTI, CNP Manager)
 
-**Architecture**: BDI with utility-based phase selection; CNP Manager role
+**Architecture**: BDI with utility-based phase selection or PPO policy; CNP Manager role
 
 **Perceive**:
 - `FIRE_ANALYSIS` INFORM from Analyst -> update `tti_value`
@@ -89,14 +89,21 @@ No memory. Purely input-output. Four instances placed at map corners.
 - `PROPOSE` from Rescuers/Firefighters/Ambulances -> accumulate proposals
 - `CONFIRM` from field units -> remove completed missions from tracking dicts
 
-**Decide** (4-phase logic):
+**Decide** (hybrid: PPO policy when trained, BDI ECT/TTI rule as pre-training fallback):
 ```
 ECT = (N_civilians / (C_exit x num_exits)) x gamma_congestion
 
-phase = 0 if TTI > 2.5 x ECT
-phase = 1 if TTI > 1.5 x ECT   # dispatch firefighters
-phase = 2 if TTI > 1.0 x ECT   # dispatch all field units
-phase = 3 otherwise              # shelter-in-place
+BDI rule:
+  phase = 0 if TTI > 2.5 x ECT
+  phase = 1 if TTI > 1.5 x ECT   # dispatch firefighters
+  phase = 2 if TTI > 1.0 x ECT   # dispatch all field units
+  phase = 3 otherwise              # shelter-in-place
+
+PPO policy: 26-dim obs → 6 actions {maintain, advance, hold_prealert,
+  force_evacuate, shelter, reassure}  (Schulman et al. 2017)
+  BDI action masking applied before argmax (Sardina & Thangarajah 2011)
+  +6 inter-agent dims: FF water levels, rescuer mission frac, nearest FF pos,
+  mean civilian panic (Yu et al. 2022)
 ```
 
 **Act** (phase-specific):
@@ -131,9 +138,9 @@ Enables Commander to pre-position firefighters before fire ignition.
 
 ---
 
-### 2.5 Firefighter — BDI + Utility (CNP Contractor)
+### 2.5 Firefighter — BDI + Utility + PPO (CNP Contractor)
 
-**Architecture**: BDI with utility-based intention selection; CNP Contractor
+**Architecture**: BDI with utility-based intention selection or PPO policy; CNP Contractor
 
 **Mission states**: IDLE -> ASSIGNED -> SUPPRESSING
 
@@ -145,10 +152,13 @@ Commander --[ACCEPT_PROPOSAL]--> Firefighter  (sets mission_status=ASSIGNED)
 Firefighter --[CONFIRM {status:COMPLETED}]--> Commander
 ```
 
-**Utility function** (decides between water_drop / fire_line / backburn):
+**decide()** (hybrid: PPO policy when trained, BDI utility as pre-training fallback):
 ```
-U = w_threat x Threat + w_efficiency x Efficiency + w_coordination x Coordination
-  w_threat=0.5, w_efficiency=0.3, w_coordination=0.2
+PPO: 24-dim obs → 5 actions {water_drop, fire_line, backburn, patrol, return_to_base}
+
+BDI utility (fallback):
+  U = w_threat x Threat + w_efficiency x Efficiency + w_coordination x Coordination
+    w_threat=0.5, w_efficiency=0.3, w_coordination=0.2
 ```
 
 **On successful water_drop**:
@@ -159,11 +169,13 @@ U = w_threat x Threat + w_efficiency x Efficiency + w_coordination x Coordinatio
 
 ---
 
-### 2.6 Rescuer — BDI (Goal-Based CNP Contractor)
+### 2.6 Rescuer — BDI + PPO (Goal-Based CNP Contractor)
 
-**Architecture**: BDI with goal-directed navigation; CNP Contractor
+**Architecture**: BDI with goal-directed navigation or PPO target priority; CNP Contractor
 
 **Mission states**: IDLE -> TO_TARGET -> RETURNING
+
+**decide()**: PPO policy (22-dim obs → 4 actions: move_highest_panic, move_nearest, move_safe_zone, wait) when trained; BDI rule (continue assigned path) as pre-training fallback.
 
 **Path risk check**: Scans `temperature_grid` along A* path. Refuses if `max_temp > RESCUER_SAFETY_THRESHOLD`.
 
@@ -489,9 +501,9 @@ The 200×200 fire and smoke grids are downsampled by factor 4 before JSON serial
 |-------|-------------|-----------------|-----------|
 | Sentinel | Reactive | — (INFORM output) | Green & Swets 1966 SDT |
 | Analyst | BDI | — (INFORM output) | Rothermel 1972 TTI |
-| Commander | BDI + Hybrid | CNP Manager | Wolshon 2006 ECT |
+| Commander | BDI + PPO | CNP Manager | Wolshon 2006 ECT + Schulman 2017 PPO |
 | RiskMonitor | Model-Based BDI | — (INFORM output) | Van Wagner 1987 FWI |
-| Firefighter | BDI + Utility | CNP Contractor | Rothermel 1972 fire-line |
-| Rescuer | BDI | CNP Contractor | — |
+| Firefighter | BDI + Utility + PPO | CNP Contractor | Rothermel 1972 fire-line + PPO |
+| Rescuer | BDI + PPO | CNP Contractor | A* pathfinding + PPO |
 | Ambulance | BDI | CNP Contractor + direct | Inness 2019 smoke injury |
 | Civilian | BDI | — (receives orders) | Greenshields 1935 + Inness 2019 |

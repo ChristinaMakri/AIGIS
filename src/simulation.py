@@ -761,6 +761,15 @@ class AIGISSimulation:
             reconsideration_log = self.agents['commander'].reconsideration_log
 
         injured = sum(1 for c in self.agents['civilians'] if c.is_injured)
+        # Burned area metrics
+        fire_grid = self.environment.fire_grid
+        total_cells = fire_grid.size
+        burned_cells = int(np.sum(fire_grid == 2))   # state 2 = burnt out
+        cell_side_m = (2.0 * self.radius) / fire_grid.shape[1]
+        cell_area_ha = (cell_side_m ** 2) / 10_000
+        burned_area_ha = burned_cells * cell_area_ha
+        burned_area_pct = (burned_cells / total_cells * 100) if total_cells > 0 else 0.0
+
         return {
             'steps': self.step,
             'steps_to_evacuate': self.step,
@@ -770,6 +779,8 @@ class AIGISSimulation:
             'injured': injured,
             'mortality_rate': casualties / total_civilians if total_civilians > 0 else 0,
             'evacuation_success_rate': evacuated / total_civilians if total_civilians > 0 else 0,
+            'burned_area_pct': burned_area_pct,
+            'burned_area_ha': round(burned_area_ha, 1),
             'avg_panic_level': np.mean(self.metrics['panic_levels']) if self.metrics['panic_levels'] else 0,
             'max_panic_level': np.max(self.metrics['panic_levels']) if self.metrics['panic_levels'] else 0,
             'rescuer_refusals': self.metrics['rescuer_refusals'],

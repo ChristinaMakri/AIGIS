@@ -233,10 +233,13 @@ class CommanderAgent(Agent):
         self._last_sent_phase: int = -1
 
         # ===== ML PREDICTION INTEGRATION =====
-        # Initialize ML predictor for enhanced risk assessment using real historical fire data
         self.risk_predictor: Optional[RiskPredictor] = None
         self.ml_predictions: Dict = {}
-        self.environment = None  # Store environment reference for ML predictions
+        self.environment = None
+
+        # ===== RL INTEGRATION =====
+        self._rl_obs: Optional[np.ndarray] = None
+        self._rl_policy_inst = None
 
         if ML_AVAILABLE and RiskPredictor:
             try:
@@ -443,23 +446,75 @@ class CommanderAgent(Agent):
 
         return False
 
+    # RL action index → phase/broadcast decision
+    _RL_ACTION_MAP = {
+        0: 'maintain',
+        1: 'advance',
+        2: 'hold_prealert',
+        3: 'force_evacuate',
+        4: 'shelter',
+        5: 'reassure',
+    }
+
+    def _get_bdi_valid_actions(self) -> list:
+        """
+        Return indices of actions safe under BDI protocol constraints.
+        Masks out actions that violate BDI operational rules before PPO argmax.
+
+        Sardina, S. & Thangarajah, J. (2011). "On the deployment of BDI agents
+        in the presence of learning algorithms." Proc. 22nd IJCAI, pp. 1810-1815.
+
+        Actions: 0=maintain, 1=advance, 2=hold_prealert, 3=force_evacuate,
+                 4=shelter, 5=reassure
+        """
+        all_actions = list(range(6))
+        invalid: set = set()
+
+        # force_evacuate (3) is redundant if phase already >= 2
+        if self.current_phase >= 2:
+            invalid.add(3)
+
+        # No reassurance (5) when fire is imminent (TTI ≤ ECT)
+        # Cova & Johnson (2002): issuing reassurance when TTI ≤ ECT delays
+        # evacuation and is causally linked to higher mortality.
+        tti = float(getattr(self, 'tti', float('inf')))
+        ect = float(getattr(self, 'ect', 0))
+        if tti > 0 and ect > 0 and tti <= ect:
+            invalid.add(5)
+
+        valid = [a for a in all_actions if a not in invalid]
+        return valid if valid else all_actions
+
     def decide(self) -> None:
         """
-        Make strategic decisions based on ECT vs TTI comparison.
-        Re-evaluate commitments periodically and when thresholds drift.
+        Make strategic decisions.
+        Uses trained PPO policy (Schulman et al. 2017) when obs is available;
+        falls back to BDI ECT/TTI rule (Cova & Johnson 2002) pre-training.
         """
-        # Check if re-evaluation is needed (throttled by interval AND commitment drift)
-        current_step = len(self.risk_history)
-        interval_due = (current_step - self.last_evaluation_step >= COMMANDER_REEVALUATION_INTERVAL)
-        if interval_due and self._should_reconsider_commitment():
-            self._reevaluate_strategy()
-            self.last_evaluation_step = current_step
+        if getattr(self, '_rl_obs', None) is not None:
+            if not hasattr(self, '_rl_policy_inst') or self._rl_policy_inst is None:
+                import os
+                from ..rl.ppo import PPOAgent
+                self._rl_policy_inst = PPOAgent(
+                    'commander', global_state_dim=_cfg_module.RL_GLOBAL_STATE_DIM
+                )
+                path = os.path.join(_cfg_module.RL_POLICY_DIR, 'commander.pt')
+                if os.path.exists(path):
+                    self._rl_policy_inst.load(path)
+            valid  = self._get_bdi_valid_actions()
+            action = self._rl_policy_inst.best_action_masked(self._rl_obs, valid)
+            self._apply_rl_phase_action(action)
+            # CNP proposal processing still happens (unchanged)
 
-        # Evaluate pending rescue proposals.
-        # Full model: Contract Net Protocol — best-utility bid wins
-        #   (Smith 1980 — "The contract net protocol", IEEE Trans. Computers C-29(12)).
-        # Ablation A (DISABLE_CNP=True): random assignment — pick first proposal,
-        #   ignoring cost/ETA.  Used to quantify CNP's contribution to outcome quality.
+        else:
+            # ── BDI fallback ──────────────────────────────────────────
+            current_step = len(self.risk_history)
+            interval_due = (current_step - self.last_evaluation_step >= COMMANDER_REEVALUATION_INTERVAL)
+            if interval_due and self._should_reconsider_commitment():
+                self._reevaluate_strategy()
+                self.last_evaluation_step = current_step
+
+        # Evaluate pending rescue proposals (always, regardless of RL/BDI)
         for cfp_id, proposals in list(self.pending_proposals.items()):
             if proposals:
                 if _cfg_module.DISABLE_CNP:
@@ -480,6 +535,25 @@ class CommanderAgent(Agent):
                     self._select_best_ambulance_proposal(cfp_id, proposals)
             else:
                 del self.ambulance_proposals[cfp_id]
+
+    def _apply_rl_phase_action(self, action: int) -> None:
+        """
+        Translate RL action integer to a phase update.
+        """
+        label = self._RL_ACTION_MAP.get(action, 'maintain')
+        if label == 'advance':
+            new_phase = min(self.current_phase + 1, 3)
+            if new_phase != self.current_phase:
+                self.current_phase = new_phase
+        elif label == 'hold_prealert':
+            self.current_phase = max(self.current_phase, 1)
+        elif label == 'force_evacuate':
+            self.current_phase = max(self.current_phase, 2)
+        elif label == 'shelter':
+            self.current_phase = 3
+        elif label == 'reassure':
+            pass  # handled downstream (panic decay)
+        # 'maintain' → no change
 
     def _dispatch_firefighters(self, environment) -> None:
         """

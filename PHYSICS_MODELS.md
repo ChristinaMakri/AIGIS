@@ -554,6 +554,214 @@ All physics parameters are in `src/config.py`. Full table:
 
 ---
 
+## 15. Multi-Agent Reinforcement Learning — Proximal Policy Optimization (PPO)
+
+### References
+- Schulman, J., Wolski, F., Dhariwal, P., Radford, A. & Klimov, O. (2017). "Proximal Policy Optimization Algorithms." *arXiv:1707.06347*.
+- Schulman, J. et al. (2016). "High-Dimensional Continuous Control Using Generalized Advantage Estimation." *ICLR 2016*.
+- Lowe, R. et al. (2017). "Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments." *NIPS*, pp. 6379–6390.
+- Bengio, Y. et al. (2009). "Curriculum Learning." *ICML-09*, pp. 41–48.
+
+### Description
+
+Three field agents (Firefighter, Rescuer, Commander) learn a policy through trial and error across 10,000 simulated episodes. The BDI rules encode domain knowledge as structural inductive bias; PPO replaces only the `decide()` step where high-level strategy selection benefits from learning.
+
+### PPO Objective (clipped surrogate)
+
+```
+L_CLIP(theta) = E[ min( r_t(theta) * A_t,  clip(r_t, 1-eps, 1+eps) * A_t ) ]
+
+r_t(theta) = pi_theta(a|s) / pi_theta_old(a|s)   [probability ratio]
+A_t = GAE advantage estimate                       [Schulman et al. 2016]
+eps = PPO_CLIP_EPSILON (0.2)
+```
+
+### Generalized Advantage Estimation (GAE)
+
+```
+A_t = sum_{l=0}^{T} (gamma * lambda)^l * delta_{t+l}
+delta_t = r_t + gamma * V(s_{t+1}) - V(s_t)       [TD residual]
+```
+
+| Parameter | Value | Description |
+|-----------|-------|-------------|
+| `PPO_CLIP_EPSILON` | 0.2 | Clipping range |
+| `PPO_GAMMA` | 0.99 | Discount factor |
+| `PPO_LAMBDA` | 0.95 | GAE lambda |
+| `PPO_LR` | 3e-4 | Adam learning rate |
+| `PPO_EPOCHS` | 4 | Update epochs per episode |
+
+### Network Architecture
+
+Each agent has an independent actor and a shared centralized critic (CTDE):
+
+```
+Actor:   obs_dim → 64 → 64 → n_actions    [tanh activations, softmax output]
+Critic:  global_state_dim(72) → 128 → 64 → 1
+
+global_state = concat(ff_obs[24], rsc_obs[22], cmd_obs[26])   = 72-dim
+  Commander obs expanded from 20 → 26 (+6 inter-agent coordination dims;
+  Yu et al. 2022 MAPPO NeurIPS arXiv:2103.01955)
+```
+
+### Curriculum
+
+Scenarios ordered by difficulty (ROTHERMEL_BASE_ROS × WIND_SPEED):
+
+| Phase | Episodes | Scenarios |
+|-------|----------|-----------|
+| 1 (easy)   | 0 – 2000   | Bages, Var, Penteli |
+| 2 (medium) | 2001 – 6000 | Rhodes, Kineta, Varibobi |
+| 3 (hard)   | 6001 – 10000 | Carr Fire, Glass Fire, Woolsey Fire |
+
+Mati 2018 and Camp Fire 2018 are **held out** — never seen during training.
+
+### Implementation
+
+Files: `src/rl/ppo.py`, `src/rl/observations.py`, `src/rl/rewards.py`,
+       `src/rl/curriculum.py`, `src/rl/qmix.py`
+
+**BDI Action Masking:** Before PPO argmax, BDI safety rules mask physically
+impossible or protocol-violating actions to −∞. Enforces hard constraints
+(empty tank → no water_drop; phase 3 active → no redundant force_evacuate).
+Sardina, S. & Thangarajah, J. (2011). IJCAI-11, pp. 1810–1815.
+
+**QMIX Credit Assignment:** `src/rl/qmix.py` implements the monotonic mixing
+network from Rashid et al. (2018). Hypernetworks generate non-negative mixing
+weights from global state; Q_tot monotonicity guarantees decentralised
+argmax is globally optimal. Rashid, T. et al. (2018). ICML 2018, PMLR 80,
+pp. 4295–4304. arXiv:1803.11605.
+
+Training: `train_marl.py`
+Evaluation: `evaluate_marl.py` (mean ± 95% CI; training + held-out scenarios)
+
+---
+
+## Section 16: Dead Fuel Moisture (Nelson 2000)
+
+Dead fine-fuel moisture content (EMC) modulates fire spread probability via
+the Rothermel (1972) moisture suppression factor η_M.
+
+### EMC Equations (NFFL three-range tables, Rothermel 1983)
+
+T in Fahrenheit, h = RH in percent [0–100]:
+
+| RH range | EMC equation |
+|----------|-------------|
+| h ≤ 10 % | EMC = 0.03229 + 0.281073 h − 0.000578 T h |
+| 10 < h ≤ 50 % | EMC = 2.22749 + 0.160107 h − 0.014784 T |
+| h > 50 % | EMC = 21.0606 + 0.005565 h² − 0.00035 T h − 0.483199 h |
+
+Coefficients from Rothermel (1983) NFFL moisture tables (cited in Nelson 2000).
+
+### Moisture Suppression Factor η_M (Rothermel 1972, Eq. 30–31)
+
+```
+η_M = 1 − 2.59 ξ + 5.11 ξ² − 3.52 ξ³
+ξ   = EMC / M_x   (clamped to [0, 1])
+M_x = 25 %        (extinction moisture, shrub/brush — Anderson 1982, NFFL Model 4)
+```
+
+Applied as: `spread_prob = FIRE_SPREAD_PROB_BASE × η_M × wind_factor × slope_factor`
+
+**Calibration values:**
+- Mati conditions (T=35 °C, RH=25 %): EMC=4.83 %, η_M=0.665
+- Moderate (T=20 °C, RH=50 %):        EMC=10.3 %, η_M=0.596
+- Wet (T=15 °C, RH=75 %):             EMC=14.6 %, η_M=0.529
+
+**References:**
+- Nelson, R.M. Jr. (2000). *Canadian Journal of Forest Research*, 30(7):1071–1087.
+- Rothermel, R.C. (1983). *USDA Forest Service GTR INT-143*, pp. 15–17.
+
+---
+
+## Section 17: Firebrand Spotting (Anderson 1983)
+
+Burning embers (firebrands) are lofted by convection columns and carried
+downwind, igniting new spot fires ahead of the main fire front. Critical for
+high-wind events such as Mati 2018.
+
+### Maximum Spotting Distance
+
+```
+D_s (m) = C1 × U^1.5 × F_h^0.5
+C1  = 0.4   (Anderson 1983, Table 1 — empirical constant)
+U   = wind speed at mid-flame height (m/s)
+F_h = 5 m   (flame height proxy, shrub/brush — NFFL Model 4, Anderson 1982)
+```
+
+At Mati conditions (U=11 m/s): D_s = 0.4 × 11^1.5 × 5^0.5 ≈ 32 m ≈ 2 grid cells.
+
+### Probability and Landing Distribution
+
+- P_spot = 0.005 per burning cell per step — calibrated from Anderson (1983)
+  Table 2 field observations (5–10 spotting events per 1000 burning-cell-steps
+  at 5–12 m/s wind).
+- Landing distance: triangular(min=1, mode=D_s/2, max=D_s) grid cells
+  (Albini 1979 spotting distance distribution).
+- Landing direction: wind-biased with Gaussian angular noise σ=π/4 rad
+  (Anderson 1983, Fig. 4 firebrand dispersion).
+
+**References:**
+- Anderson, H.E. (1983). *USDA Forest Service Research Paper INT-305*. Ogden, UT.
+- Albini, F.A. (1979). *USDA Forest Service Research Paper INT-56*. Ogden, UT.
+
+---
+
+## Section 18: Pre-Evacuation Milling Delay (Lindell & Perry 2012)
+
+Civilians do not depart immediately upon receiving an official evacuation
+order — they spend time confirming the threat, gathering family members,
+and preparing to leave. This "milling" delay is the primary source of
+deviation between order-issuance time and actual departure time.
+
+### Distribution
+
+Log-normal with parameters derived from Lindell & Perry (2012) Table 3
+("Warning-issued to departure time", commanded evacuation with
+official notification):
+
+```
+Delay ~ LogNormal(μ=5.204, σ=0.60)   [at 5 s/step]
+Median = exp(5.204) ≈ 182 steps ≈ 15.2 min
+Range (10th–90th pct): ~65–510 steps (~5–43 min)
+```
+
+σ=0.60 derived from their reported 10th–90th percentile ratio ≈ e^(2×1.28×σ).
+
+**Override:** When fire is directly visible to the civilian (fire_visible=True),
+the milling delay is bypassed — immediate flight response (ibid. p. 622,
+"threat recognition override").
+
+**Reference:**
+- Lindell, M.K. & Perry, R.W. (2012). *Risk Analysis*, 32(4):616–632.
+  DOI: 10.1111/j.1539-6924.2011.01647.x
+
+---
+
+## Section 19: Spatial Validation — Jaccard/IoU (Filippi et al. 2016)
+
+The Jaccard index (Intersection-over-Union) measures spatial overlap between
+the simulated fire scar and a reference perimeter:
+
+```
+J = |A ∩ B| / |A ∪ B|     J ∈ [0, 1]
+A = simulated burnt cells (fire_grid == 2)
+B = reference burn scar (Copernicus EMSR249 ellipse approximation)
+```
+
+Copernicus Emergency Management Service operational accuracy threshold:
+J ≥ 0.30 = "adequate" simulation (Copernicus EMS QA requirements 2018).
+
+For Mati, the reference is a WNW-elongated ellipse (2:1 aspect ratio, 35%
+area coverage) approximating the EMSR249 P07 product.
+
+**Reference:**
+- Filippi, J.B., Mallet, V., & Nader, B. (2016). *Environmental Modelling &
+  Software*, 80:262–276.  DOI: 10.1016/j.envsoft.2016.02.030.
+
+---
+
 ## Validation Scenarios
 
 ### Scenario 1: Early Warning (Successful Evacuation)

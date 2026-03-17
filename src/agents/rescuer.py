@@ -19,6 +19,7 @@ import networkx as nx
 from typing import Tuple, Optional, List, Dict
 from .base_agent import Agent
 from ..message import Message
+from .. import config as _cfg_module
 from ..config import (
     RESCUER_MAX_SPEED,
     RESCUER_FUEL_CAPACITY,
@@ -135,11 +136,13 @@ class RescuerAgent(Agent):
         self.safety_threshold = RESCUER_SAFETY_THRESHOLD  # Refuse if path risk > this
 
         # ===== PERFORMANCE OPTIMIZATION: STAGGERED PATHFINDING =====
-        # Recalculate A* path periodically (not every step) to reduce CPU load
-        # Random offset prevents all rescuers from recalculating simultaneously
-        self.path_recalc_interval = RESCUER_PATH_RECALC_INTERVAL  # Steps between recalcs
-        self.steps_since_recalc = 0  # Counter
-        self.recalc_offset = np.random.randint(0, self.path_recalc_interval)  # Random phase
+        self.path_recalc_interval = RESCUER_PATH_RECALC_INTERVAL
+        self.steps_since_recalc = 0
+        self.recalc_offset = np.random.randint(0, self.path_recalc_interval)
+
+        # ===== RL INTEGRATION =====
+        self._rl_obs: Optional[np.ndarray] = None   # set by MARL loop each step
+        self._rl_action: Optional[int] = None        # last RL action taken
 
     def perceive(self, environment) -> None:
         """Receive CFPs and mission assignments"""
@@ -353,13 +356,65 @@ class RescuerAgent(Agent):
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             self.mission_status = "IDLE"
 
+    # RL action index → mission override behaviour
+    _RL_ACTION_MAP = {
+        0: 'move_highest_panic',
+        1: 'move_nearest',
+        2: 'move_safe_zone',
+        3: 'wait',
+    }
+
+    def _get_bdi_valid_actions(self) -> list:
+        """
+        Return indices of actions safe under BDI safety rules.
+
+        Sardina, S. & Thangarajah, J. (2011). "On the deployment of BDI agents
+        in the presence of learning algorithms." Proc. 22nd IJCAI, pp. 1810-1815.
+
+        Actions: 0=move_highest_panic, 1=move_nearest, 2=move_safe_zone, 3=wait
+        """
+        all_actions = list(range(4))
+        invalid: set = set()
+
+        # If no civilians are active (all evacuated/casualty) — cannot target civilian
+        active_count = getattr(self, '_active_civilian_count', None)
+        if active_count is not None and active_count == 0:
+            invalid.update([0, 1])
+
+        valid = [a for a in all_actions if a not in invalid]
+        return valid if valid else all_actions
+
     def decide(self) -> None:
-        """Plan next action based on current mission"""
+        """
+        Plan next action.
+        Uses trained PPO policy (Schulman et al. 2017) with BDI action masking
+        (Sardina & Thangarajah 2011) when obs is available; falls back to BDI
+        rule (continue on assigned path) pre-training.
+        """
+        if self._rl_obs is not None:
+            from ..rl.ppo import PPOAgent
+            # lazy-load policy
+            if not hasattr(self, '_rl_policy_inst') or self._rl_policy_inst is None:
+                import os
+                self._rl_policy_inst = PPOAgent(
+                    'rescuer', global_state_dim=_cfg_module.RL_GLOBAL_STATE_DIM
+                )
+                path = os.path.join(_cfg_module.RL_POLICY_DIR, 'rescuer.pt')
+                if os.path.exists(path):
+                    self._rl_policy_inst.load(path)
+            valid  = self._get_bdi_valid_actions()
+            action = self._rl_policy_inst.best_action_masked(self._rl_obs, valid)
+            self._rl_action = action
+            # Actions 0-2 override mission target; action 3 = wait (no change)
+            if action == 3:
+                pass  # hold
+            # Target overrides are applied in act() when _rl_action is set
+            return
+
+        # ── BDI fallback ──────────────────────────────────────────────
         if self.mission_status == "MOVING" and self.current_path:
-            # Continue on path
             pass
         elif self.mission_status == "MOVING" and not self.current_path:
-            # Arrived at destination
             self.mission_status = "ARRIVED"
 
     def act(self, environment) -> None:

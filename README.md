@@ -82,7 +82,7 @@ TTI = distance_to_population / ROS
 ```
 Applies 20% TTI conservatism in Phase 2+. Filters already-suppressed cells from reports. Reports risk to Commander.
 
-### 3. Commander (BDI + Hybrid — ECT vs TTI)
+### 3. Commander (BDI + Hybrid — ECT vs TTI + PPO)
 Compares Evacuation Clearance Time against Time To Impact to select one of four phases:
 
 | Phase | Condition | Action |
@@ -101,7 +101,7 @@ risk = 0.40 x fwi_factor + 0.30 x fuel_factor + 0.20 x firms_factor + 0.10 x slo
 ```
 Sends top-3 high-risk zones to Commander as RISK_FORECAST messages.
 
-### 5. Firefighter (BDI + Utility — Suppression)
+### 5. Firefighter (BDI + Utility + PPO — Suppression)
 CNP contractor for fire suppression. Three strategies evaluated by utility function:
 - water_drop: 80% success rate, consumes 500 gal
 - fire_line: removes fuel perpendicular to wind direction (Rothermel 1972)
@@ -109,7 +109,7 @@ CNP contractor for fire suppression. Three strategies evaluated by utility funct
 
 On successful suppression: sends SUPPRESSION_UPDATE to Analyst (removes cell from TTI calculation) and CONFIRM to Commander.
 
-### 6. Rescuer (BDI — Goal-Based CNP Contractor)
+### 6. Rescuer (BDI + PPO — Goal-Based CNP Contractor)
 Bids on rescue missions from Commander. Path risk evaluated against temperature grid. Refuses missions through active fire. Executes A* navigation to target, recalculates on fire blockage.
 
 ### 7. Ambulance (BDI — Two-Phase Goal Stack)
@@ -186,15 +186,18 @@ python main.py --batch 50 --output results.csv
 python main.py --batch 20 --dashboard --output results.csv
 ```
 
-### Optional: ML and Real Data Setup
+### Train ML Models
 
 ```bash
-python collect_fire_data.py       # NIFC historical fire data
-python get_population_data.py     # OSM building density
-python fetch_real_weather.py      # Open-Meteo live weather
-python fetch_real_elevation.py    # SRTM elevation
-python train_models.py            # XGBoost + Random Forest
+python train_models.py            # XGBoost risk predictor (100 MC runs)
 python main.py                    # Uses trained models automatically
+```
+
+### Train + Evaluate Hybrid MARL
+
+```bash
+python train_marl.py --episodes 10000   # PPO curriculum training (~2–3 h CPU)
+python evaluate_marl.py --runs 30       # 95% CI across training + held-out scenarios
 ```
 
 ---
@@ -204,16 +207,28 @@ python main.py                    # Uses trained models automatically
 ```
 AIGIS/
 ├── main.py                        # CLI entry point
+├── train_models.py                # Train XGBoost risk predictor (MC batch)
+├── train_marl.py                  # Train hybrid PPO agents (curriculum MARL)
+├── evaluate_ml_models.py          # Evaluate ML predictor accuracy
+├── evaluate_marl.py               # Evaluate trained MARL agents (95% CI)
+├── validate_mati.py               # Validate against Mati 2018 fire
+├── validate_campfire.py           # Validate against Camp Fire 2018
+├── validate_all_incidents.py      # Diagnostic comparison: all 11 incidents
+├── run_sensitivity.py             # One-at-a-time sensitivity analysis
+├── run_ablation.py                # Ablation study (CNP, panic, RL flags)
+├── run_thesis_experiments.sh      # Full thesis pipeline (10 steps)
 ├── requirements.txt
 ├── README.md
 ├── PHYSICS_MODELS.md              # Scientific model documentation
 ├── ARCHITECTURE.md                # System design and agent logic
+├── ODD_PROTOCOL.md                # Grimm et al. (2020) ODD description
 ├── DOCKER.md
 └── src/
     ├── config.py                  # All parameters in one place
     ├── message.py                 # FIPA-ACL message class
     ├── environment.py             # LiveMapBuilder, smoke_grid, SRTM
     ├── fire_simulation.py         # Rothermel spread + smoke diffusion
+    ├── fire_predictor.py          # Step-ahead XGBoost fire predictor
     ├── simulation.py              # Main engine, metrics, final report
     ├── dashboard.py               # 7-panel matplotlib PNG dashboard
     ├── web_dashboard.py           # Real-time Flask/SSE web dashboard
@@ -226,14 +241,20 @@ AIGIS/
     │   ├── firms_connector.py     # NASA FIRMS ignition density
     │   ├── airquality_connector.py  # OpenAQ PM2.5 / AQI
     │   └── ems_connector.py       # OSM hospital node lookup
+    ├── rl/
+    │   ├── ppo.py                 # PPO actor-critic (Schulman et al. 2017)
+    │   ├── observations.py        # Per-role observation builders (24/22/26-dim)
+    │   ├── qmix.py                # QMIX monotonic mixing network (Rashid et al. 2018)
+    │   ├── rewards.py             # Per-role step + terminal reward functions
+    │   └── curriculum.py         # 9-scenario curriculum (Bengio et al. 2009)
     └── agents/
         ├── base_agent.py          # Abstract BDI base (perceive/decide/act)
         ├── sentinel.py            # Reactive — Signal Detection Theory
         ├── analyst.py             # BDI — Rothermel TTI + phase feedback
-        ├── commander.py           # BDI + Hybrid — ECT/TTI + CNP Manager
+        ├── commander.py           # BDI + PPO — ECT/TTI + CNP Manager
         ├── risk_monitor.py        # Model-Based — pre-ignition FWI risk
-        ├── firefighter.py         # BDI + Utility — water/fire-line/backburn
-        ├── rescuer.py             # BDI — CNP Contractor, A* pathfinding
+        ├── firefighter.py         # BDI + Utility + PPO — water/fire-line/backburn
+        ├── rescuer.py             # BDI + PPO — CNP Contractor, A* pathfinding
         ├── ambulance.py           # BDI — two-phase medical extraction
         └── civilian.py            # BDI — crowd dynamics, smoke injury
 ```
@@ -324,6 +345,8 @@ CSV columns exported with `--batch N`:
 | `rescuer_refusals` | Refused missions (path blocked) |
 | `max_fire_cells` | Peak simultaneous burning cells |
 | `final_phase` | Commander final phase (0–3) |
+| `burned_area_pct` | Percentage of grid cells burned out |
+| `burned_area_ha` | Absolute burned area in hectares |
 
 ---
 
@@ -362,6 +385,11 @@ See [DOCKER.md](DOCKER.md) for details.
 11. Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of neighborhood evacuations in the urban-wildland interface." *Environment and Planning A*, 34(12), pp. 2211–2230.
 12. Wolshon, B. (2006). "Evacuation planning and engineering for Hurricane Katrina." *The Bridge*, 36(1), pp. 27–34.
 13. Lagouvardos, K. et al. (2019). "Meteorological analysis of the catastrophic wildfire in Mati, eastern Attica, Greece." *BAMS*, 100(11), pp. 2243–2257.
+14. Schulman, J., Wolski, F., Dhariwal, P., Radford, A. & Klimov, O. (2017). "Proximal Policy Optimization Algorithms." *arXiv:1707.06347*.
+15. Bengio, Y., Louradour, J., Collobert, R. & Weston, J. (2009). "Curriculum Learning." *ICML-09*, pp. 41–48.
+16. Lowe, R. et al. (2017). "Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments." *NIPS*, pp. 6379–6390.
+17. Mas, E. et al. (2021). "An interdisciplinary agent-based multimodal wildfire evacuation model." *Transportation Research Part D*, 99, 103007.
+18. Mann, H.B. & Whitney, D.R. (1947). "On a Test of Whether One of Two Random Variables is Stochastically Larger than the Other." *Annals of Mathematical Statistics*, 18(1), pp. 50–60.
 
 ---
 

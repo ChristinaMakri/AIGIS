@@ -520,6 +520,32 @@ assert 0 <= CIVILIAN_PANIC_RATIONAL <= CIVILIAN_PANIC_CONFUSED <= 1.0, \
     "Panic thresholds must be in order: 0 ≤ RATIONAL ≤ CONFUSED ≤ 1.0"
 
 # =============================================================================
+# MULTI-AGENT REINFORCEMENT LEARNING (MARL)
+# =============================================================================
+# AIGIS uses a hybrid BDI + RL architecture:
+#   - perceive() / act(): BDI rules handle mechanics (pathfinding, CNP, fire
+#     suppression execution) — domain knowledge that would take too long to
+#     learn from scratch.
+#   - decide(): trained PPO policy selects the strategy. Falls back to BDI
+#     rules automatically if no trained model file exists yet (pre-training).
+#
+# References:
+#   Schulman, J. et al. (2017). "Proximal Policy Optimization Algorithms."
+#     arXiv:1707.06347.
+#   Lowe, R. et al. (2017). "Multi-Agent Actor-Critic for Mixed Cooperative-
+#     Competitive Environments." NeurIPS. arXiv:1706.02275.  (CTDE shared critic)
+#   Bengio, Y. et al. (2009). "Curriculum Learning." ICML-09.
+RL_POLICY_DIR      = 'models/rl'   # directory where .pt policy files are saved
+RL_TRAINING_STEPS  = 200           # MAX_STEPS override during RL training episodes
+
+# Global state dim for shared critic = sum of agent obs dims.
+# Commander obs expanded from 20 → 26 (added 6 inter-agent coordination dims).
+# Yu et al. (2022) MAPPO: "The Surprising Effectiveness of PPO in Cooperative
+# Multi-Agent Games." NeurIPS 2022. arXiv:2103.01955.
+# Firefighter(24) + Rescuer(22) + Commander(26) = 72
+RL_GLOBAL_STATE_DIM = 72
+
+# =============================================================================
 # NUMPY RANDOM SEED INITIALIZATION
 # =============================================================================
 # NOTE: Do NOT set global seed here! This breaks Monte Carlo simulations.

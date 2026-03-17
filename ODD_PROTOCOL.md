@@ -49,14 +49,14 @@ AIGIS contains the following agent types:
 
 | Agent | Count (default) | Role |
 |-------|----------------|------|
-| `SentinelAgent` | 1 | Continuous fire perimeter monitoring; computes FWI |
-| `AnalystAgent` | 1 | Probabilistic risk maps; ML model predictions |
-| `CommanderAgent` | 1 | Mission planning; CNP bid solicitation and award |
-| `FirefighterAgent` | 2 | Active fire suppression; water tank management |
-| `RescuerAgent` | 2 | Locates and extracts injured civilians |
-| `AmbulanceAgent` | 1 | Medical transport of critically injured civilians |
-| `CivilianAgent` | 60 | Evacuating population; panic-state machine |
-| `RiskMonitorAgent` | 1 | Real-time AQI and smoke exposure tracking |
+| `SentinelAgent` | 4 | Reactive fire detection via Signal Detection Theory; debounced INFORM to Analyst |
+| `AnalystAgent` | 1 | BDI — computes Rothermel TTI/ROS from sentinel reports; filters suppressed cells |
+| `CommanderAgent` | 1 | BDI + PPO — ECT/TTI 4-phase logic; CNP Manager for all field units |
+| `RiskMonitorAgent` | 1 | Model-Based BDI — pre-ignition risk grid (FWI + FIRMS + fuel + slope) |
+| `FirefighterAgent` | 2 | BDI + Utility + PPO — CNP Contractor; water drop / fire-line / backburn |
+| `RescuerAgent` | 3 | BDI + PPO — CNP Contractor; A* path to highest-priority civilian |
+| `AmbulanceAgent` | 2 | BDI — two-leg CNP Contractor; direct self-dispatch on civilian INJURY_REPORT |
+| `CivilianAgent` | 60 | BDI — three-state cognitive machine; smoke injury accumulation; Greenshields traffic |
 
 In addition, the **Environment** object contains a 200×200 grid representing the simulation area, overlaid with:
 - `fire_grid` — cell-level fire state (no fire / burning / burned)
@@ -173,8 +173,8 @@ The `CommanderAgent` broadcasts Call-for-Proposals (CFPs) for fire suppression a
 > Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of neighborhood-level evacuation in the urban-wildland interface." *Environment and Planning A*, 34(12), pp. 2211–2229. DOI: 10.1068/a34251
 
 Civilians transition between three states based on panic level:
-- **Rational** (`panic < 0.3`): follows A*-computed optimal route
-- **Confused** (`0.3 ≤ panic < 0.7`): route compliance degrades; random detours possible
+- **Rational** (`panic < 0.4`): follows A*-computed optimal route
+- **Confused** (`0.4 ≤ panic < 0.7`): route compliance degrades; random detours possible
 - **Herding** (`panic ≥ 0.7`): follows nearest civilian (social contagion)
 
 ### 4.2 Emergence
@@ -191,7 +191,7 @@ Agents adapt their behaviour based on perceived environment state:
 
 - **Civilians** switch intention from 'shelter' to 'evacuate' when perceived fire distance falls below a threshold or when a commander evacuation order is received.
 - **Firefighters** switch from suppression to refill when `water_level < 20%`, then return to the nearest unassigned fire cell.
-- **Commander** escalates operational phase ('monitoring' → 'active_response' → 'mass_evacuation' → 'recovery') based on fire area thresholds and civilian panic levels.
+- **Commander** escalates operational phase (Phase 0: Monitor → Phase 1: Pre-Alert → Phase 2: Mass Evacuation → Phase 3: Shelter-in-Place) based on ECT vs TTI ratio (Wolshon 2006; Cova & Johnson 2002), or via the trained PPO policy.
 
 ### 4.4 Objectives
 
@@ -204,7 +204,15 @@ Agents adapt their behaviour based on perceived environment state:
 
 ### 4.5 Learning
 
-No learning occurs within a single simulation run. Across batch runs, the `ml_predictor.py` module loads pre-trained XGBoost models (`models/*.pkl`) that encode fire-spread patterns from historical training data. These models are not updated during simulation.
+**Within a single run:** No online learning occurs. Agent decisions are fixed by pre-trained models.
+
+**Across training runs (MARL):** Three agents (Firefighter, Rescuer, Commander) use Proximal Policy Optimization (PPO) trained via `train_marl.py` over 10,000 simulated episodes using a 9-scenario curriculum ordered by fire intensity (Bengio et al. 2009). Centralized Training Decentralized Execution (CTDE; Lowe et al. 2017): a shared 72-dimensional global critic is used during training; at inference each agent uses only its local observation (24-dim Firefighter, 22-dim Rescuer, 26-dim Commander). Commander obs expanded from 20 → 26 to include firefighter water levels, rescuer mission fractions, and mean civilian panic (Yu et al. 2022). BDI safety constraints are enforced via action masking — invalid actions are set to −∞ before argmax so PPO cannot select physically impossible or protocol-violating actions (Sardina & Thangarajah 2011). QMIX monotonic value decomposition (`src/rl/qmix.py`) addresses cooperative credit assignment (Rashid et al. 2018).
+
+> Schulman, J. et al. (2017). "Proximal Policy Optimization Algorithms." arXiv:1707.06347.
+> Bengio, Y. et al. (2009). "Curriculum Learning." ICML-09, pp. 41–48.
+> Lowe, R. et al. (2017). "Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments." NIPS, pp. 6379–6390.
+
+The XGBoost models in `models/*.pkl` encode statistical patterns from batch simulation runs and are loaded at startup by `ml_predictor.py`. They are not updated during simulation.
 
 ### 4.6 Prediction
 
@@ -332,10 +340,31 @@ ROS = ROTHERMEL_BASE_ROS × fuel_type_factor × (1 + wind_factor) × (1 + slope_
 Ignition probability for each neighbour cell per step:
 
 ```
-p_ignite = FIRE_SPREAD_PROB_BASE × (ROS / ROTHERMEL_BASE_ROS) × (1 − moisture_factor)
+p_ignite = FIRE_SPREAD_PROB_BASE × η_M × wind_factor × slope_factor × fuel_factor
 ```
 
+where **η_M** is the dead fuel moisture suppression factor (Rothermel 1972, Eq. 30–31):
+
+```
+EMC = f(T, RH)   [NFFL three-range tables; Rothermel 1983, cited in Nelson 2000]
+η_M = 1 − 2.59(EMC/M_x) + 5.11(EMC/M_x)² − 3.52(EMC/M_x)³
+M_x = 25 %  (shrub/brush extinction moisture, Anderson 1982)
+```
+
+Nelson, R.M. Jr. (2000). *Canadian Journal of Forest Research*, 30(7):1071–1087.
+
 A Bernoulli trial determines whether the cell ignites.
+
+**Firebrand spotting** (`_simulate_spotting()`) runs after each spread step.
+Burning cells probabilistically loft embers downwind:
+
+```
+D_s (m) = 0.4 × U^1.5 × F_h^0.5   (Anderson 1983, INT-305 Table 1)
+P_spot  = 0.005 per burning cell per step
+Direction: wind-biased with σ = π/4 angular noise
+```
+
+Anderson, H.E. (1983). *USDA Forest Service Research Paper INT-305*.
 
 ### 7.2 Traffic Model — Greenshields
 
@@ -371,9 +400,21 @@ Where:
 - `fire_proximity_factor` = `max(0, 1 - dist_to_fire / MAX_FIRE_DIST)`
 
 State thresholds:
-- Rational: `panic < CIVILIAN_PANIC_RATIONAL` (0.3)
-- Confused: `0.3 ≤ panic < CIVILIAN_PANIC_CONFUSED` (0.7)
+- Rational: `panic < CIVILIAN_PANIC_RATIONAL` (0.4)
+- Confused: `0.4 ≤ panic < CIVILIAN_PANIC_CONFUSED` (0.7)
 - Herding: `panic ≥ 0.7`
+
+**Pre-evacuation milling delay:** When an EVACUATE order is received and
+fire is not yet visible, a milling delay is sampled before departure begins:
+
+```
+delay ~ LogNormal(μ=5.204, σ=0.60)   → median ≈ 182 steps ≈ 15.2 min at 5 s/step
+```
+
+Bypassed when fire is directly visible (immediate flight response).
+
+> Lindell, M.K. & Perry, R.W. (2012). "The Protective Action Decision Model."
+> *Risk Analysis*, 32(4):616–632. Table 3.
 
 ### 7.4 Pathfinding — A* on OSM Road Network
 
@@ -408,16 +449,30 @@ Civilians exposed to `AQI > SMOKE_AQI_INJURY_THRESHOLD` for ≥ `SMOKE_EXPOSURE_
 
 ### 7.7 Machine Learning Risk Predictor
 
-Four XGBoost regression models (`models/*.pkl`) are loaded by `ml_predictor.py`:
-- `fire_spread_predictor.pkl` — fire growth rate (cells/step)
-- `evacuation_time_predictor.pkl` — expected steps to clear zone
-- `risk_score_predictor.pkl` — composite risk score [0–1]
-- `resource_predictor.pkl` — recommended additional resources
+Three XGBoost regression models (`models/*.pkl`) are loaded by `ml_predictor.py`:
+- `casualty_risk_model.pkl` — predicted casualty count
+- `containment_time_model.pkl` — expected steps to fire containment
+- `evacuation_count_model.pkl` — expected number of successful evacuations
 
 Feature vector (per prediction call):
-- Fire cells count, burned area, wind speed, wind direction, temperature, RH, civilian count active, panic mean, steps elapsed
+- Fire cells count, burned area, wind speed, wind direction, temperature, relative humidity, civilian count active, panic mean, steps elapsed
 
 Models were trained on synthetic batch-run data using `train_models.py`.
+
+### 7.8 Hybrid MARL — PPO Policy
+
+The three field agents (Firefighter, Rescuer, Commander) replace their BDI `decide()` method with a PPO-trained policy at inference time. The BDI rules serve as a pre-training fallback when no `.pt` policy file is present.
+
+Each policy is a two-layer MLP (64 hidden units, tanh activations):
+- Firefighter actor: 24-dim obs → 5 actions {water_drop, fire_line, backburn, patrol, return_to_base}
+- Rescuer actor: 22-dim obs → 4 actions {move_highest_panic, move_nearest, move_safe_zone, wait}
+- Commander actor: 26-dim obs → 6 actions {maintain, advance, hold_prealert, force_evacuate, shelter, reassure}
+  (+6 inter-agent dims vs. original 20: FF water levels, rescuer mission frac, nearest FF pos, mean panic)
+
+A shared centralized critic (128→64→1) receives the concatenated 72-dim global state during training
+(FF:24 + RSC:22 + CMD:26; CTDE). GAE (Schulman et al. 2016) is used to compute advantages.
+BDI action masking constrains PPO to BDI-safe actions before argmax (Sardina & Thangarajah 2011).
+QMIX mixing network (`src/rl/qmix.py`) provides monotonic cooperative credit assignment (Rashid et al. 2018).
 
 ---
 
@@ -433,5 +488,23 @@ Models were trained on synthetic batch-run data using `train_models.py`.
 - Rao, A.S. & Georgeff, M.P. (1995). *Proceedings of ICMAS-95*, pp. 312–319.
 - Rothermel, R.C. (1972). *USDA Forest Service Research Paper INT-115*.
 - Saltelli, A. et al. (2008). *Global Sensitivity Analysis: The Primer*. Wiley.
+- Saltelli, A. et al. (2010). *Computer Physics Communications*, 181(2):259–270. [Sobol estimator]
+- Sardina, S. & Thangarajah, J. (2011). *Proc. 22nd IJCAI*, pp. 1810–1815. [BDI action masking]
 - Smith, R.G. (1980). *IEEE Transactions on Computers*, C-29(12):1104–1113.
+- Anderson, H.E. (1983). *USDA Forest Service Research Paper INT-305*. [Spotting distance]
+- Albini, F.A. (1979). *USDA Forest Service Research Paper INT-56*. [Spotting distribution]
+- Nelson, R.M. Jr. (2000). *Canadian Journal of Forest Research*, 30(7):1071–1087. [Dead fuel moisture]
+- Lindell, M.K. & Perry, R.W. (2012). *Risk Analysis*, 32(4):616–632. [Milling delay]
+- Filippi, J.B., Mallet, V., & Nader, B. (2016). *Environmental Modelling & Software*, 80:262–276. [Jaccard/IoU]
+- Rashid, T. et al. (2018). *ICML 2018*, PMLR 80:4295–4304. [QMIX]
+- Yu, C. et al. (2022). *NeurIPS 2022*. arXiv:2103.01955. [MAPPO inter-agent obs]
 - Wilensky, U. & Rand, W. (2015). *An Introduction to Agent-Based Modeling*. MIT Press.
+
+**Sensitivity analysis** (`run_sensitivity.py`) uses Sobol variance-based global
+sensitivity analysis (Saltelli et al. 2010) rather than one-at-a-time (OAT).
+Outputs: first-order Si and total-effect STi indices with 95% bootstrap CI.
+N=128 Saltelli samples → 1792 model runs (N × (2D+2), D=6 parameters).
+
+**Spatial validation** (`validate_mati.py`) computes Jaccard/IoU between the
+simulated burn scar and a Copernicus EMSR249-derived reference ellipse
+(Filippi et al. 2016). Threshold J ≥ 0.30 = adequate (Copernicus EMS QA 2018).
