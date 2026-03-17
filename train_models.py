@@ -154,7 +154,7 @@ def _apply_overrides(overrides: dict) -> dict:
 
 def _reset_overrides(snapshot: dict) -> None:
     """Restore all module-level bindings to their pre-override values."""
-    for (mod, param), original in snapshot.values():
+    for (_, param), (mod, original) in snapshot.items():
         setattr(mod, param, original)
 
 # ---------------------------------------------------------------------------
