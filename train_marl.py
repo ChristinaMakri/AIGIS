@@ -306,7 +306,7 @@ def train(
     print('AIGIS — MARL Training  (Independent PPO + CTDE Critic)')
     print('=' * 70)
     print('Schulman et al. (2017) PPO  |  Lowe et al. (2017) CTDE')
-    print('Bengio et al. (2009) Curriculum  |  9 training scenarios')
+    print('Bengio et al. (2009) Curriculum  |  12 training scenarios (3 phases)')
     print(f'Total episodes: {total_episodes}  |  Steps/episode: {training_steps}')
     print(f'Device: {device}  |  Output: {output_dir}')
     print('=' * 70 + '\n')
@@ -355,17 +355,28 @@ def train(
         evac_hist.append(stats['evacuation_success_rate'])
 
         log_rows.append({
-            'episode':     ep,
-            'scenario':    stats['scenario'],
-            'curriculum':  curriculum.current_curriculum_phase,
-            'mortality':   stats['mortality_rate'],
-            'evacuation':  stats['evacuation_success_rate'],
-            'burned_pct':  stats['burned_area_pct'],
-            'reward_ff':   stats['reward_ff'],
-            'reward_rsc':  stats['reward_rsc'],
-            'reward_cmd':  stats['reward_cmd'],
-            'loss_actor_ff':   losses['ff'].get('actor_loss', 0),
-            'loss_actor_cmd':  losses['cmd'].get('actor_loss', 0),
+            'episode':          ep,
+            'scenario':         stats['scenario'],
+            'curriculum':       curriculum.current_curriculum_phase,
+            'mortality':        stats['mortality_rate'],
+            'evacuation':       stats['evacuation_success_rate'],
+            'burned_pct':       stats['burned_area_pct'],
+            'reward_ff':        stats['reward_ff'],
+            'reward_rsc':       stats['reward_rsc'],
+            'reward_cmd':       stats['reward_cmd'],
+            # Actor losses — all three roles (Yu et al. 2022 MAPPO logging standard)
+            'loss_actor_ff':    losses['ff'].get('actor_loss',  0),
+            'loss_actor_rsc':   losses['rsc'].get('actor_loss', 0),
+            'loss_actor_cmd':   losses['cmd'].get('actor_loss', 0),
+            # Critic losses — convergence diagnostic (Yu et al. 2022)
+            'loss_critic_ff':   losses['ff'].get('critic_loss',  0),
+            'loss_critic_rsc':  losses['rsc'].get('critic_loss', 0),
+            'loss_critic_cmd':  losses['cmd'].get('critic_loss', 0),
+            # Policy entropy — exploration/exploitation diagnostic (Yu et al. 2022;
+            # MARL Diagnostics paper, arXiv:2312.08468)
+            'entropy_ff':       losses['ff'].get('entropy',  0),
+            'entropy_rsc':      losses['rsc'].get('entropy', 0),
+            'entropy_cmd':      losses['cmd'].get('entropy', 0),
         })
 
         if ep % log_every == 0:
@@ -405,11 +416,23 @@ def _role_name(short: str) -> str:
 
 
 def _plot_training_curves(df: pd.DataFrame, out_path: str) -> None:
-    fig, axes = plt.subplots(2, 2, figsize=(12, 8), facecolor=BG)
+    """
+    6-panel training diagnostic figure (3 rows x 2 cols):
+      Row 1: Mortality rate | Evacuation success rate
+      Row 2: Firefighter reward | Rescuer reward
+      Row 3: Mean policy entropy (all agents) | Mean critic loss (all agents)
+
+    Entropy and critic loss panels follow the MARL diagnostics standard:
+      Yu et al. (2022). MAPPO. NeurIPS. arXiv:2103.01955.
+      Cooperative MARL Diagnostics (2023). arXiv:2312.08468.
+    Curriculum phase boundaries (episodes 2000, 6000) marked as vertical lines.
+    """
+    fig, axes = plt.subplots(3, 2, figsize=(12, 12), facecolor=BG)
     fig.suptitle(
         'AIGIS MARL Training  |  Independent PPO (Schulman et al. 2017)\n'
-        'Curriculum: Bengio et al. (2009)  |  9 training scenarios',
-        color=FG, fontsize=10, fontweight='bold',
+        'Curriculum: Bengio et al. (2009)  |  12 training scenarios  |  '
+        'Phases: P1 easy → P2 medium → P3 hard',
+        color=FG, fontsize=9, fontweight='bold',
     )
 
     def smooth(x, w=100):
@@ -417,22 +440,43 @@ def _plot_training_curves(df: pd.DataFrame, out_path: str) -> None:
             return x
         return pd.Series(x).rolling(w, min_periods=1).mean().values
 
+    # Compute mean entropy and critic loss across all 3 roles per episode
+    for col in ['entropy_ff', 'entropy_rsc', 'entropy_cmd',
+                'loss_critic_ff', 'loss_critic_rsc', 'loss_critic_cmd']:
+        if col not in df.columns:
+            df[col] = 0.0
+    df['entropy_mean']     = df[['entropy_ff', 'entropy_rsc', 'entropy_cmd']].mean(axis=1)
+    df['critic_loss_mean'] = df[['loss_critic_ff', 'loss_critic_rsc', 'loss_critic_cmd']].mean(axis=1)
+
     plots = [
-        (axes[0, 0], 'mortality',  'Mortality Rate',          '#ff006e'),
-        (axes[0, 1], 'evacuation', 'Evacuation Success Rate', '#06d6a0'),
-        (axes[1, 0], 'reward_ff',  'Firefighter Reward',      '#ffd60a'),
-        (axes[1, 1], 'reward_cmd', 'Commander Reward',        '#8b5cf6'),
+        (axes[0, 0], 'mortality',       'Mortality Rate',               '#ff006e'),
+        (axes[0, 1], 'evacuation',      'Evacuation Success Rate',      '#06d6a0'),
+        (axes[1, 0], 'reward_ff',       'Firefighter Reward',           '#ffd60a'),
+        (axes[1, 1], 'reward_rsc',      'Rescuer Reward',               '#fb5607'),
+        (axes[2, 0], 'entropy_mean',    'Mean Policy Entropy (3 roles)', '#3a86ff'),
+        (axes[2, 1], 'critic_loss_mean','Mean Critic Loss (3 roles)',    '#8338ec'),
     ]
+
+    phase_eps = [2000, 6000]   # curriculum phase boundaries (Bengio et al. 2009)
+
     for ax, col, label, colour in plots:
         ax.set_facecolor(PANEL)
         ax.tick_params(colors=FG, labelsize=7)
         for sp in ax.spines.values():
             sp.set_edgecolor('#3a3a5c')
+        if col not in df.columns:
+            ax.set_visible(False)
+            continue
         vals = df[col].values
-        ax.plot(df['episode'], vals, color=colour, alpha=0.3, linewidth=0.5)
-        ax.plot(df['episode'], smooth(vals), color=colour, linewidth=1.5)
+        ax.plot(df['episode'], vals, color=colour, alpha=0.25, linewidth=0.5)
+        ax.plot(df['episode'], smooth(vals), color=colour, linewidth=1.5,
+                label='100-ep rolling mean')
+        # Mark curriculum phase boundaries
+        for ph_ep in phase_eps:
+            ax.axvline(ph_ep, color='white', linestyle=':', linewidth=0.8, alpha=0.6)
         ax.set_xlabel('Episode', color=FG, fontsize=8)
         ax.set_ylabel(label, color=FG, fontsize=8)
+        ax.legend(fontsize=6, facecolor=PANEL, labelcolor=FG)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=130, bbox_inches='tight', facecolor=BG)

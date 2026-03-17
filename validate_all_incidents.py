@@ -1,15 +1,16 @@
 """
 AIGIS — Multi-Incident Diagnostic Validation
 =============================================
-Runs the simulation across all 11 fire incidents (9 training + 2 held-out)
+Runs the simulation across all 16 fire incidents (12 training + 4 held-out)
 and compares outputs against documented historical values.
 
 Purpose
 -------
 Not to validate unseen generalisation (use validate_mati.py / validate_campfire.py
-for that), but to diagnose *where* the simulation diverges from reality on each
-incident — identifying systematic errors in fire spread, evacuation, or casualty
-modelling that can guide calibration.
+/ validate_pedrogao.py / validate_alexandroupoli.py for that), but to diagnose
+*where* the simulation diverges from reality on each incident — identifying
+systematic errors in fire spread, evacuation, or casualty modelling that can
+guide calibration.
 
 Training incidents are labelled [calibration]; held-out as [OOD].
 
@@ -224,6 +225,66 @@ INCIDENTS = [
             'burned_area_pct': 65.0,
         },
     },
+    # ── Phase 2 additions ─────────────────────────────────────────────────
+    {
+        'name': 'Manavgat, Turkey',
+        'split': 'calibration',
+        'lat': 36.786, 'lon': 31.437, 'radius': 3000,
+        'fire_locations': [(36.798, 31.449), (36.792, 31.443)],
+        'params': {
+            'WIND_SPEED': 10.0, 'WIND_INITIAL_DIRECTION': 200.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 25.0,
+            'FIRE_SPREAD_PROB_BASE': 0.42, 'ROTHERMEL_BASE_ROS': 0.85,
+            'NUM_CIVILIANS': 55,
+        },
+        # Manavgat July-Aug 2021: 8 fatalities; ~50,000 evacuated; ~138,000 ha
+        # Source: Copernicus EMSR532 (2021)
+        # 3 km radius: ~45 % coverage
+        'documented': {
+            'mortality_rate': 0.00016,    # 8 / 50,000 ≈ 0.016 %
+            'burned_area_pct': 45.0,
+        },
+    },
+    # ── Phase 3 additions ─────────────────────────────────────────────────
+    {
+        'name': 'Fort McMurray, Alberta',
+        'split': 'calibration',
+        'lat': 56.726, 'lon': -111.379, 'radius': 3000,
+        'fire_locations': [(56.738, -111.367), (56.732, -111.373)],
+        'params': {
+            'WIND_SPEED': 20.0, 'WIND_INITIAL_DIRECTION': 45.0,
+            'WIND_OSCILLATION_AMPLITUDE': 15.0, 'WIND_OSCILLATION_PERIOD': 20.0,
+            'FIRE_SPREAD_PROB_BASE': 0.52, 'ROTHERMEL_BASE_ROS': 1.10,
+            'NUM_CIVILIANS': 60,
+        },
+        # Horse River Fire May 2016: 0 direct fatalities; 88,000 evacuated; 590,000 ha
+        # Source: Natural Resources Canada (2017) Information Report NOR-X-430E
+        # 3 km radius: town core largely burned ~55 %
+        'documented': {
+            'mortality_rate': 0.00,
+            'burned_area_pct': 55.0,
+        },
+    },
+    {
+        'name': 'Gospers Mountain, NSW',
+        'split': 'calibration',
+        'lat': -33.250, 'lon': 150.400, 'radius': 3000,
+        'fire_locations': [(-33.238, 150.412), (-33.244, 150.406)],
+        'params': {
+            'WIND_SPEED': 17.0, 'WIND_INITIAL_DIRECTION': 135.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 18.0,
+            'FIRE_SPREAD_PROB_BASE': 0.50, 'ROTHERMEL_BASE_ROS': 1.05,
+            'NUM_CIVILIANS': 55,
+        },
+        # Black Summer 2019-2020 (Gospers Mountain sub-event):
+        # 0 direct fatalities; 512,000 ha burned
+        # Source: AFAC (2020); NSW RFS (2020)
+        # 3 km radius: dense eucalyptus, ~50 % coverage
+        'documented': {
+            'mortality_rate': 0.00,
+            'burned_area_pct': 50.0,
+        },
+    },
     # ── Held-out (OOD) ────────────────────────────────────────────────────
     {
         'name': 'Mati 2018 (held-out)',
@@ -238,10 +299,10 @@ INCIDENTS = [
         },
         # Mati 23 July 2018: 102 fatalities out of ~6,000 in the zone → 1.70 %
         # Source: Lagouvardos et al. (2019) BAMS; Copernicus EMSR249 (2018)
-        # Copernicus EMSR249: ~980 ha burned within the 3 km zone (2,827 ha) → 35 %
+        # Copernicus EMSR249: ~980 ha burned within 3 km zone → 35 %
         'documented': {
-            'mortality_rate': 0.017,      # 102 / 6,000 ≈ 1.70 %
-            'burned_area_pct': 35.0,      # EMSR249 within 3 km radius
+            'mortality_rate': 0.017,
+            'burned_area_pct': 35.0,
         },
     },
     {
@@ -255,13 +316,48 @@ INCIDENTS = [
             'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 0.85,
             'NUM_CIVILIANS': 60,
         },
-        # Camp Fire 8 Nov 2018: 85 fatalities; 52,000 evacuated; 62,053 ha total
-        # Source: CAL FIRE (2020) Camp Fire Final; ICS-209; MTBS 2018 dNBR analysis
-        # 3 km radius: nearly fully burned (Paradise town core) → ~70 %
-        # Mortality among evacuees: 85 / 52,000 ≈ 0.16 %
+        # Camp Fire 8 Nov 2018: 85 fatalities; 26,918 population → 0.32 %
+        # Source: CAL FIRE (2020); MTBS (2018) dNBR; Butte County GIS
         'documented': {
-            'mortality_rate': 0.0016,     # 85 / 52,000 ≈ 0.16 %
-            'burned_area_pct': 70.0,      # MTBS 2018 dNBR: Paradise town core
+            'mortality_rate': 0.0032,
+            'burned_area_pct': 70.0,
+        },
+    },
+    {
+        'name': 'Pedrogao Grande 2017 (held-out)',
+        'split': 'OOD',
+        'lat': 39.947, 'lon': -8.148, 'radius': 3000,
+        'fire_locations': [(39.958, -8.137), (39.953, -8.143), (39.948, -8.150)],
+        'params': {
+            'WIND_SPEED': 22.0, 'WIND_INITIAL_DIRECTION': 225.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 25.0,
+            'FIRE_SPREAD_PROB_BASE': 0.48, 'ROTHERMEL_BASE_ROS': 0.95,
+            'NUM_CIVILIANS': 60,
+        },
+        # Pedrogao Grande 17-18 June 2017: 66 fatalities; ~7,500 population → 0.88 %
+        # Source: Viegas et al. (2017) ADAI/CEIF; Copernicus EMSR218
+        'documented': {
+            'mortality_rate': 0.0088,
+            'burned_area_pct': 40.0,
+        },
+    },
+    {
+        'name': 'Alexandroupoli 2023 (held-out)',
+        'split': 'OOD',
+        'lat': 41.049, 'lon': 26.357, 'radius': 3000,
+        'fire_locations': [(41.061, 26.369), (41.055, 26.363), (41.049, 26.357)],
+        'params': {
+            'WIND_SPEED': 16.0, 'WIND_INITIAL_DIRECTION': 170.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
+            'FIRE_SPREAD_PROB_BASE': 0.50, 'ROTHERMEL_BASE_ROS': 1.05,
+            'NUM_CIVILIANS': 60,
+        },
+        # Evros/Alexandroupoli Aug 2023: 20 fatalities; ~5,000 in zone → 0.40 %
+        # ~81,000 ha total; largest fire in EU recorded history
+        # Source: Copernicus EMSR689 (2023); Greek Fire Service (2023)
+        'documented': {
+            'mortality_rate': 0.0040,
+            'burned_area_pct': 45.0,
         },
     },
 ]

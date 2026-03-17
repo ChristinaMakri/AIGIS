@@ -3,6 +3,7 @@ Location-Agnostic Environment Builder with Real SRTM Elevation or Perlin Noise T
 Dynamically identifies safe zones using OSM tags and map perimeter
 """
 import io
+import pickle
 import numpy as np
 import osmnx as ox
 import networkx as nx
@@ -243,7 +244,37 @@ class LiveMapBuilder:
         self.grid_size = grid_size
 
     def build(self) -> Environment:
-        """Build the complete environment"""
+        """
+        Build the complete environment.
+
+        Results are cached to disk by (lat, lon, radius, grid_size) so that
+        repeated runs at the same location (e.g. 30 Monte Carlo runs during
+        validation) only fetch OSM/Corine data once.  The fire_grid and other
+        dynamic simulation-state grids are reset to zero on every load so each
+        run starts with a clean slate.
+        """
+        cache_dir  = Path('.env_cache')
+        cache_dir.mkdir(exist_ok=True)
+        cache_key  = (f"{self.center[0]:.5f}_{self.center[1]:.5f}"
+                      f"_{int(self.radius)}_{self.grid_size[0]}x{self.grid_size[1]}")
+        cache_path = cache_dir / f"{cache_key}.pkl"
+
+        if cache_path.exists():
+            try:
+                with open(cache_path, 'rb') as fh:
+                    env = pickle.load(fh)
+                # Reset all simulation-state grids so each run starts clean
+                env.fire_grid  = np.zeros(env.grid_shape, dtype=np.int8)
+                for attr in ('smoke_grid', 'wind_grid', 'population_density'):
+                    if hasattr(env, attr):
+                        arr = getattr(env, attr)
+                        if isinstance(arr, np.ndarray):
+                            setattr(env, attr, np.zeros_like(arr))
+                print(f"  [Cache] Loaded environment from cache ({cache_key})")
+                return env
+            except Exception:
+                cache_path.unlink(missing_ok=True)   # corrupt cache — rebuild
+
         print("🌍 Building Location-Agnostic Environment...")
 
         # Step 1: Fetch road network
@@ -285,7 +316,7 @@ class LiveMapBuilder:
 
         print(f"✅ Environment built! {len(safe_nodes)} safe zones identified.")
 
-        return Environment(
+        env = Environment(
             graph=graph,
             fuel_grid=fuel_grid,
             obstacle_grid=obstacle_grid,
@@ -297,6 +328,16 @@ class LiveMapBuilder:
             radius=self.radius,
             num_road_exits=num_road_exits,
         )
+
+        # Save to disk cache for subsequent runs at the same location
+        try:
+            with open(cache_path, 'wb') as fh:
+                pickle.dump(env, fh, protocol=4)
+            print(f"  [Cache] Environment saved to cache ({cache_key})")
+        except Exception as e:
+            print(f"  [Cache] Warning: could not save cache: {e}")
+
+        return env
 
     def _fetch_corine_fuel(self, bounds: Tuple[float, float, float, float]) -> Optional[np.ndarray]:
         """

@@ -149,6 +149,21 @@ def jaccard_index(sim_burn_mask: np.ndarray, ref_burn_mask: np.ndarray) -> float
     return float(intersection / union)
 
 
+def dice_coefficient(sim_burn_mask: np.ndarray, ref_burn_mask: np.ndarray) -> float:
+    """
+    Sorensen-Dice coefficient: Dice = 2|A ∩ B| / (|A| + |B|).
+    Complementary metric to Jaccard; less penalising for small-object misalignment.
+    Filippi et al. (2016) Section 4.1; MDPI AI-for-Wildfire review (2024).
+    Relationship to Jaccard: Dice = 2J / (1 + J).
+    Threshold equivalent to J >= 0.30: Dice >= 0.46.
+    """
+    intersection = np.logical_and(sim_burn_mask, ref_burn_mask).sum()
+    denom = sim_burn_mask.sum() + ref_burn_mask.sum()
+    if denom == 0:
+        return 0.0
+    return float(2 * intersection / denom)
+
+
 # ---------------------------------------------------------------------------
 # Mati 2018 documented conditions (Lagouvardos et al. 2019)
 # ---------------------------------------------------------------------------
@@ -265,6 +280,7 @@ def run_validation(num_runs: int = 30, output_file: str = "mati_validation_resul
             sim_burn_mask = (fire_grid == 2)
             jaccard = jaccard_index(sim_burn_mask, _ref_burn_mask)
 
+        dice = dice_coefficient(sim_burn_mask, _ref_burn_mask) if fire_grid is not None else 0.0
         results.append({
             'run_id':                  i,
             'steps':                   result['steps'],
@@ -279,8 +295,8 @@ def run_validation(num_runs: int = 30, output_file: str = "mati_validation_resul
             'max_panic_level':         result['max_panic_level'],
             'max_fire_cells':          result['max_fire_cells'],
             'final_phase':             result['final_phase'],
-            # Spatial validation metric (Filippi et al. 2016)
             'jaccard_iou':             jaccard,
+            'dice_coefficient':        dice,
         })
 
     print()  # newline after \r progress
@@ -369,14 +385,18 @@ def _print_validation_table(df: pd.DataFrame) -> None:
     if 'jaccard_iou' in df.columns:
         jac_mean = df['jaccard_iou'].mean()
         jac_std  = df['jaccard_iou'].std()
-        # Copernicus EMS operational threshold: J ≥ 0.3 = acceptable
-        # (Copernicus EMS QA requirements for rapid-mapping products, 2018)
         jac_status = 'PASS' if jac_mean >= 0.30 else 'REVIEW'
         print(f"\nSpatial Jaccard/IoU (Filippi et al. 2016, Eq. 5):")
         print(f"  Simulated vs. EMSR249 ellipse: {jac_mean:.3f} ± {jac_std:.3f}")
         print(f"  Copernicus QA threshold: J ≥ 0.30  →  {jac_status}")
         print(f"  Note: reference is an ellipse approximation of EMSR249 P07;")
         print(f"  exact shapefile comparison would require the Copernicus GIS files.")
+    if 'dice_coefficient' in df.columns:
+        dice_mean = df['dice_coefficient'].mean()
+        dice_std  = df['dice_coefficient'].std()
+        print(f"\nSorensen-Dice Coefficient (Filippi et al. 2016):")
+        print(f"  Simulated vs. EMSR249 ellipse: {dice_mean:.3f} ± {dice_std:.3f}")
+        print(f"  (Dice = 2*IoU / (1+IoU); threshold equiv. to J>=0.30: Dice>=0.46)")
 
     print("\n" + "=" * 70)
     overall = "PASS — outputs consistent with documented Mati event" if all_pass \
@@ -398,40 +418,56 @@ validation methodology on the same event.
 
 def _plot_validation(df: pd.DataFrame, out_path: str) -> None:
     """
-    Save a 2-panel validation figure:
-      Left:  Distribution of mortality_rate across runs vs. documented value
-      Right: Distribution of evacuation_success_rate across runs vs. documented
+    Save a 4-panel validation figure:
+      Row 1: mortality_rate | evacuation_success_rate
+      Row 2: burned_area_pct | jaccard_iou
+    Each panel shows the simulated distribution vs. the documented/threshold value.
     """
     BG = '#1a1a2e'; PANEL = '#16213e'; FG = '#e0e0e0'
-    fig = plt.figure(figsize=(12, 5), facecolor=BG)
+    fig = plt.figure(figsize=(12, 10), facecolor=BG)
     fig.suptitle(
         "AIGIS vs. Mati 2018  |  Lagouvardos et al. (2019)  |  "
         f"n={len(df)} runs",
         color=FG, fontsize=11, fontweight='bold'
     )
-    gs = gridspec.GridSpec(1, 2, figure=fig, wspace=0.35)
+    gs = gridspec.GridSpec(2, 2, figure=fig, wspace=0.35, hspace=0.45)
 
     panels = [
-        ('mortality_rate',          'Mortality Rate',          MATI_DOCUMENTED['mortality_rate'],          '#ff006e'),
-        ('evacuation_success_rate', 'Evacuation Success Rate', MATI_DOCUMENTED['evacuation_success_rate'], '#06d6a0'),
+        (0, 0, 'mortality_rate',          'Mortality Rate',
+         MATI_DOCUMENTED['mortality_rate'],          '#ff006e', True),
+        (0, 1, 'evacuation_success_rate', 'Evacuation Success Rate',
+         MATI_DOCUMENTED['evacuation_success_rate'], '#06d6a0', True),
+        (1, 0, 'burned_area_pct',         'Burned Area (% of zone)',
+         MATI_DOCUMENTED['burned_area_3km_pct'],     '#ffd166', False),
+        (1, 1, 'jaccard_iou',             'Jaccard / IoU  (Filippi et al. 2016)',
+         0.30,                                       '#8338ec', False),
     ]
 
-    for idx, (col, label, target, colour) in enumerate(panels):
-        ax = fig.add_subplot(gs[0, idx])
+    for row, col_idx, col, label, target, colour, pct_fmt in panels:
+        if col not in df.columns:
+            continue
+        ax = fig.add_subplot(gs[row, col_idx])
         ax.set_facecolor(PANEL)
         ax.tick_params(colors=FG, labelsize=8)
         for sp in ax.spines.values():
             sp.set_edgecolor('#3a3a5c')
 
-        ax.hist(df[col], bins=12, color=colour, alpha=0.75, edgecolor='white', linewidth=0.5)
-        ax.axvline(target, color='white', linestyle='--', linewidth=1.5,
-                   label=f"Documented: {target:.2%}")
-        ax.axvline(df[col].mean(), color=colour, linestyle='-', linewidth=2,
-                   label=f"Simulated mean: {df[col].mean():.2%}")
+        ax.hist(df[col], bins=12, color=colour, alpha=0.75,
+                edgecolor='white', linewidth=0.5)
+        lbl_doc = (f"Documented: {target:.2%}" if pct_fmt
+                   else (f"Documented: {target:.1f}%"
+                         if col == 'burned_area_pct' else f"Threshold: {target:.2f}"))
+        lbl_sim = (f"Simulated mean: {df[col].mean():.2%}" if pct_fmt
+                   else (f"Simulated mean: {df[col].mean():.1f}%"
+                         if col == 'burned_area_pct'
+                         else f"Simulated mean: {df[col].mean():.3f}"))
+        ax.axvline(target, color='white', linestyle='--', linewidth=1.5, label=lbl_doc)
+        ax.axvline(df[col].mean(), color=colour, linestyle='-', linewidth=2, label=lbl_sim)
         ax.set_xlabel(label, color=FG, fontsize=9)
         ax.set_ylabel('Frequency', color=FG, fontsize=9)
         ax.legend(fontsize=7, facecolor=PANEL, labelcolor=FG)
-        ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.1%}"))
+        if pct_fmt:
+            ax.xaxis.set_major_formatter(plt.FuncFormatter(lambda x, _: f"{x:.1%}"))
 
     fig.savefig(out_path, dpi=150, bbox_inches='tight', facecolor=BG)
     print(f"Validation plot saved to: {out_path}")

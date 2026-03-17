@@ -2,15 +2,17 @@
 AIGIS — Hybrid BDI+RL Evaluation
 ==================================
 Evaluates the trained hybrid system on:
-  1. Training scenarios (in-distribution check)
-  2. Held-out Mati 2018 (OOD generalisation)
-  3. Held-out Camp Fire 2018 (OOD generalisation)
+  1. All 12 training scenarios (in-distribution check, one per curriculum phase)
+  2. 4 held-out real-incident scenarios (OOD generalisation):
+       Mati 2018, Camp Fire 2018, Pedrogao Grande 2017, Alexandroupoli 2023
 
-Reports: mean, std, 95% CI across N independent runs.
+Reports: mean, std, 95% CI across N independent runs per scenario.
   Bengio, Y. et al. (2009). "Curriculum learning." ICML.
   Schulman, J. et al. (2017). "Proximal Policy Optimization." arXiv:1707.06347.
   Grimm, V. et al. (2020). "The ODD Protocol for Describing Agent-Based and
     Other Simulation Models." JASSS, 23(2), 7.
+  Filippi, J.B. et al. (2016). "Representation and evaluation of wildfire
+    simulations." Environmental Modelling & Software, 80, pp. 262-276.
 
 Usage
 -----
@@ -36,9 +38,14 @@ warnings.filterwarnings('ignore')
 
 BG, PANEL, FG = '#1a1a2e', '#16213e', '#e0e0e0'
 
-# Held-out scenarios (never seen during training)
+# ---------------------------------------------------------------------------
+# Held-out scenarios — never seen during MARL training.
+# Each entry mirrors the corresponding validate_*.py documented conditions.
+# ---------------------------------------------------------------------------
 HELD_OUT = [
     {
+        # Lagouvardos et al. (2019) BAMS 100(11):2243-2257
+        # Copernicus EMSR249 | 102 fatalities / ~6,000 population = 1.70 %
         'name': 'Mati 2018 (held-out)',
         'lat': 38.090, 'lon': 23.920, 'radius': 3000,
         'fire_locations': [(38.097, 23.940), (38.092, 23.932), (38.085, 23.925)],
@@ -50,6 +57,8 @@ HELD_OUT = [
         },
     },
     {
+        # CAL FIRE (2020); NWS Sacramento (2018)
+        # 85 fatalities / ~27,000 population = 0.31 %
         'name': 'Camp Fire 2018 (held-out)',
         'lat': 39.759, 'lon': -121.622, 'radius': 3000,
         'fire_locations': [(39.793, -121.575), (39.779, -121.593)],
@@ -57,6 +66,33 @@ HELD_OUT = [
             'WIND_SPEED': 16.0, 'WIND_INITIAL_DIRECTION': 225.0,
             'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
             'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 0.85,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        # Viegas et al. (2017) ADAI/CEIF; Guerreiro et al. (2018)
+        # Copernicus EMSR218 | 66 fatalities / ~7,500 population = 0.88 %
+        'name': 'Pedrogao Grande 2017 (held-out)',
+        'lat': 39.947, 'lon': -8.148, 'radius': 3000,
+        'fire_locations': [(39.958, -8.137), (39.953, -8.143), (39.948, -8.150)],
+        'params': {
+            'WIND_SPEED': 22.0, 'WIND_INITIAL_DIRECTION': 225.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 25.0,
+            'FIRE_SPREAD_PROB_BASE': 0.48, 'ROTHERMEL_BASE_ROS': 0.95,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        # Copernicus EMSR689 (2023); Greek Fire Service (2023); EMY (2023)
+        # Largest fire in EU history: ~81,000 ha
+        # 20 fatalities / ~5,000 in study zone = 0.40 %
+        'name': 'Alexandroupoli 2023 (held-out)',
+        'lat': 41.049, 'lon': 26.357, 'radius': 3000,
+        'fire_locations': [(41.061, 26.369), (41.055, 26.363), (41.049, 26.357)],
+        'params': {
+            'WIND_SPEED': 16.0, 'WIND_INITIAL_DIRECTION': 170.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
+            'FIRE_SPREAD_PROB_BASE': 0.50, 'ROTHERMEL_BASE_ROS': 1.05,
             'NUM_CIVILIANS': 60,
         },
     },
@@ -105,13 +141,17 @@ def evaluate(
     print('AIGIS — Hybrid BDI+RL Evaluation')
     print('=' * 70)
     print('Grimm et al. (2020) ODD  |  Schulman et al. (2017) PPO')
+    print('12 training scenarios (phases 1-3) + 4 held-out real incidents')
     print(f'Runs per scenario: {num_runs}  |  Policy dir: {policy_dir}')
     print('=' * 70 + '\n')
 
     agents = _load_agents(policy_dir, device)
 
     all_rows = []
-    eval_scenarios = SCENARIOS[:3] + HELD_OUT  # 3 training + 2 held-out
+    # All 12 curriculum training scenarios + 4 held-out real incidents = 16 total.
+    # Training split confirms in-distribution generalisation across phases 1–3.
+    # Held-out split measures OOD generalisation to real documented events.
+    eval_scenarios = list(SCENARIOS) + HELD_OUT  # 12 training + 4 held-out
 
     for scenario in eval_scenarios:
         name = scenario['name']

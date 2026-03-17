@@ -1,17 +1,19 @@
 """
-Training curriculum across the 9 historical fire scenarios.
-============================================================
+Training curriculum across the 12 historical fire scenarios.
+=============================================================
 Implements difficulty-ordered curriculum learning:
   Bengio, Y., Louradour, J., Collobert, R., & Weston, J. (2009).
   "Curriculum Learning." ICML-09, pp. 41–48.
   [Start with easy scenarios; add harder ones as training progresses.]
 
 Scenarios are ordered by fire intensity (ROTHERMEL_BASE_ROS × WIND_SPEED):
-  Phase 1 (easy):   Bages, Var, Penteli       — low wind / low ROS
-  Phase 2 (medium): Rhodes, Kineta, Varibobi  — moderate wind
-  Phase 3 (hard):   Carr, Glass, Woolsey      — high wind + fast spread
+  Phase 1 (easy):   Bages, Var, Penteli                  — low wind / low ROS
+  Phase 2 (medium): Manavgat, Rhodes, Kineta, Varibobi   — moderate wind
+  Phase 3 (hard):   Fort McMurray, Gospers Mtn, Carr,
+                    Glass, Woolsey                        — high wind + fast spread
 
-Mati and Camp Fire are HELD OUT — never used in training.
+Held out (never used in training — reserved for validation only):
+  Mati 2018, Camp Fire 2018, Pedrogao Grande 2017, Alexandroupoli 2023
 """
 from __future__ import annotations
 from typing import Optional
@@ -61,6 +63,23 @@ SCENARIOS = [
     },
     # ── Phase 2: Medium ──────────────────────────────────────────────────
     {
+        'name': 'Manavgat, Turkey',
+        'phase': 2,
+        'lat': 36.786, 'lon': 31.437, 'radius': 3000,
+        'fire_locations': [(36.798, 31.449), (36.792, 31.443)],
+        # Copernicus EMSR532 (2021): Etesian NNE wind from 20°→ TO 200° (SSW).
+        # Wind speed: ~10 m/s; temperature: 40–45 °C; RH: 10–20 %.
+        # Reference: Copernicus EMS (2021). EMSR532 Manavgat Fire, Turkey.
+        #   https://emergency.copernicus.eu/mapping/list-of-activations-rapid
+        # ~138,000 ha burned July–August 2021; 8 fatalities.
+        'params': {
+            'WIND_SPEED': 10.0, 'WIND_INITIAL_DIRECTION': 200.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 25.0,
+            'FIRE_SPREAD_PROB_BASE': 0.42, 'ROTHERMEL_BASE_ROS': 0.85,
+            'NUM_CIVILIANS': 55,
+        },
+    },
+    {
         'name': 'Rhodes, Greece',
         'phase': 2,
         'lat': 36.198, 'lon': 28.002, 'radius': 3000,
@@ -97,6 +116,44 @@ SCENARIOS = [
         },
     },
     # ── Phase 3: Hard ────────────────────────────────────────────────────
+    {
+        'name': 'Fort McMurray, Alberta',
+        'phase': 3,
+        'lat': 56.726, 'lon': -111.379, 'radius': 3000,
+        'fire_locations': [(56.738, -111.367), (56.732, -111.373)],
+        # Horse River Fire, May 2016: SW wind pushing fire NE.
+        # SW wind = FROM 225° → TO 45° (NE). AIGIS TO convention.
+        # Documented: wind 25–30 km/h (~7–8 m/s), gusts to 70 km/h;
+        # temperature 33 °C; RH 15 %.  0 direct fatalities; 88,000 evacuated.
+        # Reference: Natural Resources Canada (2017). "The Fort McMurray
+        #   Horse River Wildfire: Alberta Fire Review."  Information Report
+        #   NOR-X-430E, Northern Forestry Centre, Edmonton, AB.
+        'params': {
+            'WIND_SPEED': 20.0, 'WIND_INITIAL_DIRECTION': 45.0,
+            'WIND_OSCILLATION_AMPLITUDE': 15.0, 'WIND_OSCILLATION_PERIOD': 20.0,
+            'FIRE_SPREAD_PROB_BASE': 0.52, 'ROTHERMEL_BASE_ROS': 1.10,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        'name': 'Gospers Mountain, NSW',
+        'phase': 3,
+        'lat': -33.250, 'lon': 150.400, 'radius': 3000,
+        'fire_locations': [(-33.238, 150.412), (-33.244, 150.406)],
+        # Black Summer 2019–2020: pre-frontal NW wind driving fire SE.
+        # NW wind = FROM 315° → TO 135° (SE). AIGIS TO convention.
+        # Documented: NW wind 15–20 m/s; Fire Danger Index > 100 (AFAC 2020).
+        # 512,000 ha burned (Gospers Mountain sub-event); 0 direct fatalities.
+        # Reference: AFAC (2020). "Australian Seasonal Bushfire Outlook."
+        #   Australasian Fire and Emergency Service Authorities Council.
+        #   See also: NSW RFS (2020). Gospers Mountain Fire — incident review.
+        'params': {
+            'WIND_SPEED': 17.0, 'WIND_INITIAL_DIRECTION': 135.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 18.0,
+            'FIRE_SPREAD_PROB_BASE': 0.50, 'ROTHERMEL_BASE_ROS': 1.05,
+            'NUM_CIVILIANS': 55,
+        },
+    },
     {
         'name': 'Carr Fire, Redding CA',
         'phase': 3,
@@ -142,7 +199,7 @@ class ScenarioCurriculum:
 
     Phase 1 (episodes 0   → phase1_end):   easy only
     Phase 2 (episodes ph1 → phase2_end):   easy + medium
-    Phase 3 (episodes ph2 → end):          all 9 scenarios
+    Phase 3 (episodes ph2 → end):          all 12 scenarios
 
     Bengio et al. (2009) — start simple, add complexity gradually.
     """
