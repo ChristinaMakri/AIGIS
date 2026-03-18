@@ -192,11 +192,22 @@ def _world_outlines():
 # ---------------------------------------------------------------------------
 
 def plot_diversity(output_file: str = 'dataset_diversity.png') -> None:
+    n_train = len(TRAINING)
+    n_held  = len(HELD_OUT)
+    all_yrs = sorted({s['year'] for s in TRAINING + HELD_OUT})
+    n_cont  = len(set(s['continent'] for s in TRAINING + HELD_OUT))
+    wind_all = [s['wind'] for s in TRAINING + HELD_OUT]
+    ros_all  = [s['ros']  for s in TRAINING + HELD_OUT]
+
     fig = plt.figure(figsize=(20, 14), facecolor=BG)
     fig.suptitle(
         'AIGIS Dataset Diversity  —  15 Training Scenarios + 9 Held-Out (OOD) Scenarios\n'
-        'Sources: Copernicus EMS, CAL FIRE, NFPA, Royal Commission, Koutsias et al. (2012), Encinas et al. (2015)',
-        color=FG, fontsize=11, fontweight='bold', y=0.98,
+        f'{n_train + n_held} real incidents  |  {n_cont} continents  |  '
+        f'Period {min(all_yrs)}–{max(all_yrs)}  |  '
+        f'Wind {min(wind_all):.0f}–{max(wind_all):.0f} m/s  |  '
+        f'ROS {min(ros_all):.2f}–{max(ros_all):.2f} m/s  |  '
+        'Curriculum: 3 phases (Bengio et al. 2009)',
+        color=FG, fontsize=10, fontweight='bold', y=0.99,
     )
 
     gs = gridspec.GridSpec(
@@ -369,99 +380,31 @@ def plot_diversity(output_file: str = 'dataset_diversity.png') -> None:
                       fontsize=6.5, facecolor='#0d0d1e', labelcolor=FG,
                       edgecolor=GRID, loc='upper right')
 
-    # ── Panel 4: Temporal + Continental diversity ─────────────────────────────
+    # ── Panel 4: Continental distribution pie chart ───────────────────────────
+    from collections import Counter
     ax_info = fig.add_subplot(gs[1, 2])
     ax_info.set_facecolor(PANEL)
-    ax_info.tick_params(colors=FG, labelsize=8)
-    ax_info.set_title('Temporal & Regional Coverage', color=FG, fontsize=9,
+    ax_info.set_title('Continental Distribution', color=FG, fontsize=9,
                       fontweight='bold')
-    for sp in ax_info.spines.values():
-        sp.set_edgecolor(GRID)
+    ax_info.axis('off')
 
-    # Timeline scatter: year vs intensity
-    ax_info.set_xlabel('Year', color=FG, fontsize=8)
-    ax_info.set_ylabel('Fire Intensity  (wind × ROS)', color=FG, fontsize=8)
-    ax_info.grid(color=GRID, linestyle='--', linewidth=0.4, alpha=0.5)
-
-    for s in TRAINING:
-        c = PHASE_COLOURS[s['phase']]
-        intensity = s['wind'] * s['ros']
-        ax_info.scatter(s['year'], intensity, s=90, c=c, marker=TRAIN_MARKER,
-                        alpha=0.85, edgecolors='white', linewidths=0.5, zorder=3)
-
-    for s in HELD_OUT:
-        intensity = s['wind'] * s['ros']
-        ax_info.scatter(s['year'], intensity, s=120, c=HELD_COLOUR,
-                        marker=HELD_MARKER, alpha=0.88, edgecolors='white',
-                        linewidths=0.7, zorder=4)
-
-    # Annotate a few notable events
-    notable = {
-        'Black Saturday 2009': (-0.3, 1.5),
-        'Fort McMurray, AB': (0.3, -1.2),
-        'Lahaina 2023': (-3.5, 1.0),
-        'Peloponnese 2007': (0.3, -1.5),
-    }
-    all_scenarios = TRAINING + HELD_OUT
-    for s in all_scenarios:
-        if s['name'] in notable:
-            dx, dy = notable[s['name']]
-            intensity = s['wind'] * s['ros']
-            short = s['name'].split(',')[0].replace(' 20', "'").replace('Fort McMurray', 'Ft McMurray')
-            ax_info.annotate(short, xy=(s['year'], intensity),
-                             xytext=(s['year'] + dx, intensity + dy),
-                             fontsize=6.5, color=FG, alpha=0.85,
-                             arrowprops=dict(arrowstyle='-', color=FG, lw=0.5))
-
-    ax_info.tick_params(axis='both', labelcolor=FG)
-    ax_info.xaxis.set_major_locator(plt.MaxNLocator(integer=True, nbins=6))
-
-    # ── Continent summary inset ───────────────────────────────────────────────
-    from collections import Counter
     all_continents = [s['continent'] for s in TRAINING] + [s['continent'] for s in HELD_OUT]
     counts = Counter(all_continents)
     cont_labels = list(counts.keys())
     cont_vals   = [counts[k] for k in cont_labels]
     cont_cols   = [CONTINENT_COLOURS.get(k, '#888') for k in cont_labels]
+    wedge_labels = [f'{k}\n({counts[k]} scenarios)' for k in cont_labels]
 
-    # Pie inset — bottom-right corner, away from data clusters
-    ax_inset = ax_info.inset_axes([0.60, 0.02, 0.36, 0.40])
-    ax_inset.set_facecolor('#0d0d1e')
-    wedges, _ = ax_inset.pie(cont_vals, colors=cont_cols, startangle=90,
-                              wedgeprops=dict(width=0.6, edgecolor='#1a1a2e', linewidth=0.8))
-    ax_inset.set_title('Regions', color=FG, fontsize=6.5, pad=2)
-
-    # Continent legend to the right of the pie, inside the inset axes
-    for k, col in zip(cont_labels, cont_cols):
-        ax_inset.plot([], [], 's', color=col, markersize=4,
-                      label=f'{k} ({counts[k]})')
-    ax_inset.legend(fontsize=5.0, facecolor='#0d0d1e', labelcolor=FG,
-                    edgecolor='none', loc='center left',
-                    bbox_to_anchor=(1.0, 0.5), ncol=1)
-
-    # ── Dataset summary text box — top-left, clear of data ───────────────────
-    n_train = len(TRAINING)
-    n_held  = len(HELD_OUT)
-    all_yrs = sorted({s['year'] for s in TRAINING + HELD_OUT})
-    n_cont  = len(set(s['continent'] for s in TRAINING + HELD_OUT))
-    wind_all = [s['wind'] for s in TRAINING + HELD_OUT]
-    ros_all  = [s['ros']  for s in TRAINING + HELD_OUT]
-
-    summary = (
-        f"Dataset: {n_train + n_held} real incidents\n"
-        f"Training: {n_train}  |  Held-Out OOD: {n_held}\n"
-        f"Period: {min(all_yrs)}–{max(all_yrs)}\n"
-        f"Continents: {n_cont}\n"
-        f"Wind: {min(wind_all):.0f}–{max(wind_all):.0f} m/s\n"
-        f"ROS:  {min(ros_all):.2f}–{max(ros_all):.2f} m/s\n"
-        f"Curriculum: 3 phases (Bengio et al. 2009)"
+    ax_info.pie(
+        cont_vals,
+        labels=wedge_labels,
+        colors=cont_cols,
+        startangle=90,
+        wedgeprops=dict(width=0.55, edgecolor='#1a1a2e', linewidth=1.2),
+        textprops=dict(color=FG, fontsize=8),
+        autopct='%1.0f%%',
+        pctdistance=0.75,
     )
-    ax_info.text(0.02, 0.97, summary,
-                 transform=ax_info.transAxes,
-                 fontsize=7, color=FG, va='top', ha='left',
-                 bbox=dict(boxstyle='round,pad=0.4', facecolor='#0d0d1e',
-                           edgecolor=GRID, alpha=0.9),
-                 family='monospace')
 
     # ── Save ─────────────────────────────────────────────────────────────────
     fig.savefig(output_file, dpi=150, bbox_inches='tight', facecolor=BG)
