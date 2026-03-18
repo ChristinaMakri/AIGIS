@@ -187,13 +187,16 @@ MATI_FIRE_LOCATIONS = [
 # ESE wind = coming FROM 115° = going TOWARD 295° (WNW).
 # Fire spread toward the coast (WNW) consistent with 295° TO direction.
 MATI_CONFIG_OVERRIDES = {
-    'WIND_INITIAL_DIRECTION': 295.0,    # Going WNW — ESE wind (Lagouvardos 2019)
+    # Mati 23 July 2018 — two-phase wind event (Lagouvardos et al. 2019):
+    #   Phase 1 (17:52–~18:20): NE Etesian wind ~60 deg, fire spreads SW toward coast
+    #   Phase 2 (~18:20 onward): mesoscale shift to WNW ~295 deg, fire spreads SE,
+    #   trapping evacuees on the coastal road (Lagouvardos et al. 2019, Fig. 8)
+    'WIND_INITIAL_DIRECTION': 60.0,     # Phase 1: NE Etesian (fire starts heading SW)
     'WIND_SPEED': 11.0,                 # m/s mean at fire front (ibid.)
     'WIND_OSCILLATION_AMPLITUDE': 8.0,  # Moderate gusting documented
     'WIND_OSCILLATION_PERIOD': 30.0,
-    # High fire-danger conditions: hot, dry, strong wind
-    # FWI ≈ 40–60 corresponds to extreme fire danger
-    # (Van Wagner 1987 FWI scale: >30 = Very High, >50 = Extreme)
+    'WIND_SHIFT_STEP': 15,              # ~30 min into event (~1/3 of typical run)
+    'WIND_SHIFT_DIRECTION': 295.0,      # Phase 2: WNW — catches coastal evacuees
     'FIRE_SPREAD_PROB_BASE': 0.45,      # Elevated for extreme conditions
     'ROTHERMEL_BASE_ROS': 0.7,          # High ROS for dry Mediterranean summer
     'NUM_CIVILIANS': 80,                # ~6,000 residents in Mati/Neos Voutzas zone

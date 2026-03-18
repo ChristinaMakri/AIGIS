@@ -34,6 +34,8 @@ from .config import (
     WIND_OSCILLATION_PERIOD,
     WIND_OSCILLATION_AMPLITUDE,
     WIND_SPEED,
+    WIND_SHIFT_STEP,
+    WIND_SHIFT_DIRECTION,
     LOG_WIND_CHANGES,
     FIRE_TEMP_BURNING,
     FIRE_TEMP_COOLING_RATE,
@@ -76,12 +78,21 @@ class FireSimulation:
         self.ambient_temperature = FIRE_TEMP_AMBIENT  # °C (config default = 20)
         self._moisture_factor    = 1.0    # computed by _update_dead_fuel_moisture()
 
+        # Physics parameters as instance attributes (can be overridden per-scenario)
+        self.fire_spread_prob_base = FIRE_SPREAD_PROB_BASE
+        self.rothermel_base_ros    = ROTHERMEL_BASE_ROS
+
         # Dynamic wind parameters - implements oscillating wind direction
         # This simulates natural wind pattern changes during wildfire events
         self.wind_direction_degrees = WIND_INITIAL_DIRECTION
         self.wind_initial_direction = WIND_INITIAL_DIRECTION
         self.wind_oscillation_period = WIND_OSCILLATION_PERIOD  # Steps for full sine cycle
         self.wind_oscillation_amplitude = WIND_OSCILLATION_AMPLITUDE  # Max deviation in degrees
+
+        # Sudden wind shift (models mesoscale front passages, e.g. Mati 2018)
+        self.wind_shift_step      = WIND_SHIFT_STEP       # 0 = disabled
+        self.wind_shift_direction = WIND_SHIFT_DIRECTION  # degrees, applied when step == shift_step
+        self._shift_applied       = False
 
         # Throttle wind logging to every 10 steps to reduce console spam
         self.last_wind_log_step = 0
@@ -100,6 +111,16 @@ class FireSimulation:
         Reference: Real wildfires experience wind shifts due to terrain, temperature,
         and the fire itself creating its own weather patterns (pyro-convection).
         """
+        # Sudden wind shift: permanently update base direction once the trigger step arrives
+        if (self.wind_shift_step > 0
+                and not self._shift_applied
+                and self.environment.step_count >= self.wind_shift_step):
+            self.wind_initial_direction = self.wind_shift_direction
+            self._shift_applied = True
+            if LOG_WIND_CHANGES:
+                print(f"  Wind shift at step {self.environment.step_count}: "
+                      f"direction changed to {self.wind_shift_direction:.1f} deg")
+
         # Calculate current wind direction based on simulation step
         if self.environment.step_count == 0:
             # Initial step: use base wind direction
@@ -397,7 +418,7 @@ class FireSimulation:
         # Modulated by dead fuel moisture factor (Nelson 2000):
         # Higher EMC (wetter fuel) → lower spread probability.
         # η_M is the Rothermel (1972, Eq. 30-31) moisture suppression factor.
-        base_prob = FIRE_SPREAD_PROB_BASE * getattr(self, '_moisture_factor', 1.0)
+        base_prob = self.fire_spread_prob_base * getattr(self, '_moisture_factor', 1.0)
 
         # ===== STEP 3: WIND FACTOR (ROTHERMEL) =====
         # Fire spreads faster when aligned with wind direction

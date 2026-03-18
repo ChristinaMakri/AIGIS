@@ -190,7 +190,7 @@ INCIDENTS = [
         'params': {
             'WIND_SPEED': 25.0, 'WIND_INITIAL_DIRECTION': 225.0,
             'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 20.0,
-            'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 1.20,
+            'FIRE_SPREAD_PROB_BASE': 0.57, 'ROTHERMEL_BASE_ROS': 1.20,
             'NUM_CIVILIANS': 75,
         },
         # Glass Fire September 2020: 0 direct fatalities; 68,000 evacuated; 11,000 ha
@@ -208,7 +208,7 @@ INCIDENTS = [
         'params': {
             'WIND_SPEED': 28.0, 'WIND_INITIAL_DIRECTION': 225.0,
             'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
-            'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 1.15,
+            'FIRE_SPREAD_PROB_BASE': 0.58, 'ROTHERMEL_BASE_ROS': 1.15,
             'NUM_CIVILIANS': 90,
         },
         # Woolsey Fire November 2018: 3 fatalities; 295,000 evacuated; 39,666 ha
@@ -277,6 +277,63 @@ INCIDENTS = [
         'documented': {
             'mortality_rate': 0.00,
             'burned_area_pct': 50.0,
+        },
+    },
+    {
+        'name': 'Dadia, Evros',
+        'split': 'calibration',
+        'lat': 41.300, 'lon': 26.200, 'radius': 3000,
+        'fire_locations': [(41.312, 26.212), (41.306, 26.206)],
+        'params': {
+            'WIND_SPEED': 12.0, 'WIND_INITIAL_DIRECTION': 180.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 25.0,
+            'FIRE_SPREAD_PROB_BASE': 0.40, 'ROTHERMEL_BASE_ROS': 0.82,
+            'NUM_CIVILIANS': 50,
+        },
+        # Dadia/Evros August 2022: 0 direct fatalities; ~84,000 ha (largest EU fire 2022)
+        # Source: Copernicus EMSR609 (2022); Greek Fire Service (2022)
+        # 3 km radius in forest zone: ~40 % coverage
+        'documented': {
+            'mortality_rate': 0.00,
+            'burned_area_pct': 40.0,
+        },
+    },
+    {
+        'name': 'Thomas Fire, CA',
+        'split': 'calibration',
+        'lat': 34.354, 'lon': -119.065, 'radius': 3000,
+        'fire_locations': [(34.366, -119.053), (34.360, -119.059)],
+        'params': {
+            'WIND_SPEED': 22.0, 'WIND_INITIAL_DIRECTION': 225.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
+            'FIRE_SPREAD_PROB_BASE': 0.52, 'ROTHERMEL_BASE_ROS': 1.12,
+            'NUM_CIVILIANS': 70,
+        },
+        # Thomas Fire December 2017: 2 indirect fatalities; 280,000 ha; largest CA fire at time
+        # Source: CAL FIRE (2018) Thomas Fire Final; MTBS 2017 dNBR; ICS-209
+        # 3 km radius: ~45 % coverage in Ventura chaparral zone
+        'documented': {
+            'mortality_rate': 0.00001,
+            'burned_area_pct': 45.0,
+        },
+    },
+    {
+        'name': 'Evia Fire, Greece',
+        'split': 'calibration',
+        'lat': 38.953, 'lon': 23.150, 'radius': 3000,
+        'fire_locations': [(38.965, 23.162), (38.959, 23.156)],
+        'params': {
+            'WIND_SPEED': 15.0, 'WIND_INITIAL_DIRECTION': 200.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 22.0,
+            'FIRE_SPREAD_PROB_BASE': 0.48, 'ROTHERMEL_BASE_ROS': 0.95,
+            'NUM_CIVILIANS': 65,
+        },
+        # Evia August 2021: 1 fatality; ~50,000 evacuated; ~51,000 ha
+        # Source: Copernicus EMSR546 (2021); Greek Fire Service (2021)
+        # 3 km radius in northern Evia pine zone: ~45 % coverage
+        'documented': {
+            'mortality_rate': 0.00002,
+            'burned_area_pct': 45.0,
         },
     },
     # ── Held-out (OOD) ────────────────────────────────────────────────────

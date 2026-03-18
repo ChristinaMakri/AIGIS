@@ -71,6 +71,10 @@ class AIGISSimulation:
         # Initialize fire simulation
         self.fire_sim = FireSimulation(self.environment)
 
+        # Apply physics config_overrides to fire_sim and src.config module so all
+        # components (analyst TTI, firefighter, etc.) see the scenario-specific values.
+        self._apply_physics_overrides()
+
         # Ignite fires from real coordinates or highest-elevation fuel zones
         self._ignite_fires(fire_locations)
 
@@ -103,6 +107,44 @@ class AIGISSimulation:
         }
 
         self.step = 0
+
+    def _apply_physics_overrides(self) -> None:
+        """
+        Apply scenario-specific physics parameters from config_overrides.
+
+        config_overrides keys that are module-level constants in src.config are
+        patched on both the src.config module (so analyst, firefighter etc. read
+        the right values) and directly on self.fire_sim (because fire_simulation.py
+        uses from-import which already bound the old values at import time).
+        """
+        import src.config as _cfg
+        overrides = self._config_overrides
+        fs = self.fire_sim
+
+        _FIRE_SIM_ATTRS = {
+            'WIND_SPEED':                ('wind_speed',              None),
+            'WIND_INITIAL_DIRECTION':    ('wind_initial_direction',  '_reset_wind_direction'),
+            'WIND_OSCILLATION_PERIOD':   ('wind_oscillation_period', None),
+            'WIND_OSCILLATION_AMPLITUDE':('wind_oscillation_amplitude', None),
+            'WIND_SHIFT_STEP':           ('wind_shift_step',         None),
+            'WIND_SHIFT_DIRECTION':      ('wind_shift_direction',    None),
+            'FIRE_SPREAD_PROB_BASE':     ('fire_spread_prob_base',   None),
+            'ROTHERMEL_BASE_ROS':        ('rothermel_base_ros',      None),
+        }
+
+        for cfg_key, val in overrides.items():
+            # Patch src.config module so analyst / other agents see the value
+            if hasattr(_cfg, cfg_key):
+                setattr(_cfg, cfg_key, val)
+            # Patch fire_sim instance attributes for the keys it owns
+            if cfg_key in _FIRE_SIM_ATTRS:
+                attr, hook = _FIRE_SIM_ATTRS[cfg_key]
+                setattr(fs, attr, val)
+
+        # If wind direction was overridden, re-initialise the direction vector
+        if 'WIND_INITIAL_DIRECTION' in overrides:
+            fs.wind_direction_degrees = overrides['WIND_INITIAL_DIRECTION']
+            fs._update_wind_vector()
 
     def _ignite_fires(self, fire_locations: list) -> None:
         """

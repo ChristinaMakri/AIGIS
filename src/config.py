@@ -69,6 +69,12 @@ WIND_OSCILLATION_PERIOD = 50.0  # steps
 WIND_OSCILLATION_AMPLITUDE = 20.0  # degrees
 WIND_SPEED = 5.0  # m/s (base speed)
 
+# Sudden wind shift (set WIND_SHIFT_STEP > 0 to enable)
+# At step == WIND_SHIFT_STEP the wind direction jumps to WIND_SHIFT_DIRECTION.
+# Models mesoscale front passages (e.g., Mati 2018 NE→WNW shift).
+WIND_SHIFT_STEP      = 0     # Step at which shift occurs (0 = disabled)
+WIND_SHIFT_DIRECTION = 0.0   # New direction after shift (degrees from North)
+
 # Wind direction vector (used by Sentinel for signal detection)
 # Calculated from WIND_INITIAL_DIRECTION
 _wind_rad = np.radians(WIND_INITIAL_DIRECTION)
