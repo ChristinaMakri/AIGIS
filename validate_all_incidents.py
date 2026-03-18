@@ -289,7 +289,7 @@ INCIDENTS = [
             'WIND_SPEED': 11.0, 'WIND_INITIAL_DIRECTION': 295.0,
             'WIND_OSCILLATION_AMPLITUDE': 8.0, 'WIND_OSCILLATION_PERIOD': 30.0,
             'FIRE_SPREAD_PROB_BASE': 0.45, 'ROTHERMEL_BASE_ROS': 0.70,
-            'NUM_CIVILIANS': 60,
+            'NUM_CIVILIANS': 80,
         },
         # Mati 23 July 2018: 102 fatalities out of ~6,000 in the zone → 1.70 %
         # Source: Lagouvardos et al. (2019) BAMS; Copernicus EMSR249 (2018)
@@ -308,7 +308,7 @@ INCIDENTS = [
             'WIND_SPEED': 16.0, 'WIND_INITIAL_DIRECTION': 225.0,
             'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
             'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 0.85,
-            'NUM_CIVILIANS': 60,
+            'NUM_CIVILIANS': 90,
         },
         # Camp Fire 8 Nov 2018: 85 fatalities; 26,918 population → 0.32 %
         # Source: CAL FIRE (2020); MTBS (2018) dNBR; Butte County GIS
@@ -326,7 +326,7 @@ INCIDENTS = [
             'WIND_SPEED': 22.0, 'WIND_INITIAL_DIRECTION': 225.0,
             'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 25.0,
             'FIRE_SPREAD_PROB_BASE': 0.48, 'ROTHERMEL_BASE_ROS': 0.95,
-            'NUM_CIVILIANS': 60,
+            'NUM_CIVILIANS': 80,
         },
         # Pedrogao Grande 17-18 June 2017: 66 fatalities; ~7,500 population → 0.88 %
         # Source: Viegas et al. (2017) ADAI/CEIF; Copernicus EMSR218
@@ -344,7 +344,7 @@ INCIDENTS = [
             'WIND_SPEED': 16.0, 'WIND_INITIAL_DIRECTION': 170.0,
             'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
             'FIRE_SPREAD_PROB_BASE': 0.50, 'ROTHERMEL_BASE_ROS': 1.05,
-            'NUM_CIVILIANS': 60,
+            'NUM_CIVILIANS': 75,
         },
         # Evros/Alexandroupoli Aug 2023: 20 fatalities; ~5,000 in zone → 0.40 %
         # ~81,000 ha total; largest fire in EU recorded history

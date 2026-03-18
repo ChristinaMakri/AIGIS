@@ -108,39 +108,39 @@ SCENARIOS = [
     # ── Held-out OOD ─────────────────────────────────────────────────────────
     dict(name='Mati 2018',            year=2018, split='Held-Out', phase=None,
          continent='Europe',
-         wind=11.0, ros=0.70, fsp=0.45, civ=60,
+         wind=11.0, ros=0.70, fsp=0.45, civ=80,
          doc_mortality=0.0170, doc_burned=35.0),
     dict(name='Camp Fire 2018',       year=2018, split='Held-Out', phase=None,
          continent='N. America',
-         wind=16.0, ros=0.85, fsp=0.55, civ=60,
+         wind=16.0, ros=0.85, fsp=0.55, civ=90,
          doc_mortality=0.0032, doc_burned=70.0),
     dict(name='Pedrogao 2017',        year=2017, split='Held-Out', phase=None,
          continent='Europe',
-         wind=22.0, ros=0.95, fsp=0.48, civ=60,
+         wind=22.0, ros=0.95, fsp=0.48, civ=80,
          doc_mortality=0.0088, doc_burned=40.0),
     dict(name='Alexandroupoli 2023',  year=2023, split='Held-Out', phase=None,
          continent='Europe',
-         wind=16.0, ros=1.05, fsp=0.50, civ=60,
+         wind=16.0, ros=1.05, fsp=0.50, civ=75,
          doc_mortality=0.0040, doc_burned=45.0),
     dict(name='Lahaina 2023',         year=2023, split='Held-Out', phase=None,
          continent='N. America',
-         wind=27.0, ros=1.25, fsp=0.58, civ=60,
+         wind=27.0, ros=1.25, fsp=0.58, civ=80,
          doc_mortality=0.0078, doc_burned=31.0),
     dict(name='Black Saturday 2009',  year=2009, split='Held-Out', phase=None,
          continent='Australia',
-         wind=18.0, ros=1.20, fsp=0.55, civ=60,
+         wind=18.0, ros=1.20, fsp=0.55, civ=75,
          doc_mortality=0.0099, doc_burned=50.0),
     dict(name='Tubbs Fire 2017',      year=2017, split='Held-Out', phase=None,
          continent='N. America',
-         wind=25.0, ros=1.18, fsp=0.56, civ=60,
+         wind=25.0, ros=1.18, fsp=0.56, civ=75,
          doc_mortality=0.0028, doc_burned=41.0),
     dict(name='Peloponnese 2007',     year=2007, split='Held-Out', phase=None,
          continent='Europe',
-         wind=14.0, ros=0.98, fsp=0.48, civ=60,
+         wind=14.0, ros=0.98, fsp=0.48, civ=65,
          doc_mortality=0.0060, doc_burned=45.0),
     dict(name='Valparaiso 2014',      year=2014, split='Held-Out', phase=None,
          continent='S. America',
-         wind=12.0, ros=0.90, fsp=0.45, civ=60,
+         wind=12.0, ros=0.90, fsp=0.45, civ=70,
          doc_mortality=0.0019, doc_burned=30.0),
 ]
 
@@ -327,15 +327,15 @@ def plot_distributions(output_dir: str) -> None:
     train = df[df['split'] == 'Training']
     held  = df[df['split'] == 'Held-Out']
 
-    fig = plt.figure(figsize=(16, 10), facecolor=BG)
+    fig = plt.figure(figsize=(17, 11), facecolor=BG)
     fig.suptitle(
         'AIGIS Dataset — Parameter Distributions: Training vs Held-Out (OOD)\n'
         'Bars = histogram  |  Dashed line = kernel density estimate  |  '
         'Vertical line = mean',
         color=FG, fontsize=10, fontweight='bold',
     )
-    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.50, wspace=0.38,
-                           left=0.06, right=0.97, top=0.88, bottom=0.08)
+    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.60, wspace=0.42,
+                           left=0.07, right=0.97, top=0.88, bottom=0.10)
 
     panels = [
         (0, 0, 'wind',           'Wind Speed (m/s)',            8),
@@ -383,11 +383,15 @@ def plot_distributions(output_dir: str) -> None:
         ax.set_xlabel(label, color=FG, fontsize=8.5)
         ax.set_ylabel('Density', color=FG, fontsize=8)
         ax.legend(fontsize=7, facecolor='#0d0d1e', labelcolor=FG,
-                  edgecolor=GRID, framealpha=0.9)
+                  edgecolor=GRID, framealpha=0.9, loc='upper right')
 
         if col == 'doc_mortality':
+            ax.xaxis.set_major_locator(plt.MaxNLocator(nbins=4))
             ax.xaxis.set_major_formatter(
                 plt.FuncFormatter(lambda x, _: f'{x:.1%}'))
+            ax.tick_params(axis='x', labelrotation=30, labelsize=7)
+            # Cap y-axis: training data spikes near 0 — show held-out range clearly
+            ax.set_ylim(0, min(ax.get_ylim()[1], 80))
 
     path = os.path.join(output_dir, 'dataset_distributions.png')
     fig.savefig(path, dpi=150, bbox_inches='tight', facecolor=BG)
@@ -404,7 +408,8 @@ def plot_intensity_mortality(output_dir: str) -> None:
     df['intensity'] = df['wind'] * df['ros']
     df['mortality_pct'] = df['doc_mortality'] * 100.0
 
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6), facecolor=BG)
+    fig, axes = plt.subplots(1, 2, figsize=(15, 7), facecolor=BG)
+    fig.subplots_adjust(bottom=0.18, wspace=0.35)
     fig.suptitle(
         'AIGIS Dataset — Fire Intensity vs Documented Mortality & Burned Area\n'
         'Validates that harder scenarios produce higher real-world outcomes '
@@ -412,10 +417,10 @@ def plot_intensity_mortality(output_dir: str) -> None:
         color=FG, fontsize=10, fontweight='bold',
     )
 
-    for ax, (ycol, ylabel) in zip(
+    for ax, (ycol, ylabel, ols_loc) in zip(
         axes,
-        [('mortality_pct', 'Documented Mortality Rate (%)'),
-         ('doc_burned',    'Documented Burned Area (% of 3 km zone)')]
+        [('mortality_pct', 'Documented Mortality Rate (%)',      'upper right'),
+         ('doc_burned',    'Documented Burned Area (% of 3 km zone)', 'upper left')]
     ):
         ax.set_facecolor(PANEL)
         ax.tick_params(colors=FG, labelsize=9)
@@ -448,9 +453,9 @@ def plot_intensity_mortality(output_dir: str) -> None:
                     color='white', linewidth=1.5, linestyle='--', alpha=0.6,
                     label=f'OLS  r={r:.2f}  p={p_val:.3f}')
             ax.legend(fontsize=8, facecolor='#0d0d1e', labelcolor=FG,
-                      edgecolor=GRID)
+                      edgecolor=GRID, loc=ols_loc)
 
-        ax.set_xlabel('Fire Intensity  (wind speed × Rothermel ROS)',
+        ax.set_xlabel('Fire Intensity  (wind × ROS)',
                       color=FG, fontsize=9)
         ax.set_ylabel(ylabel, color=FG, fontsize=9)
         if ycol == 'mortality_pct':
@@ -475,7 +480,7 @@ def plot_intensity_mortality(output_dir: str) -> None:
     ]
     fig.legend(handles=leg_elements, loc='lower center', ncol=4,
                fontsize=8.5, facecolor='#0d0d1e', labelcolor=FG,
-               edgecolor=GRID, bbox_to_anchor=(0.5, 0.01))
+               edgecolor=GRID, bbox_to_anchor=(0.5, 0.02))
 
     path = os.path.join(output_dir, 'dataset_intensity_mortality.png')
     fig.savefig(path, dpi=150, bbox_inches='tight', facecolor=BG)

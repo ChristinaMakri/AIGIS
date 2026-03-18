@@ -196,6 +196,7 @@ MATI_CONFIG_OVERRIDES = {
     # (Van Wagner 1987 FWI scale: >30 = Very High, >50 = Extreme)
     'FIRE_SPREAD_PROB_BASE': 0.45,      # Elevated for extreme conditions
     'ROTHERMEL_BASE_ROS': 0.7,          # High ROS for dry Mediterranean summer
+    'NUM_CIVILIANS': 80,                # ~6,000 residents in Mati/Neos Voutzas zone
 }
 
 # ---------------------------------------------------------------------------

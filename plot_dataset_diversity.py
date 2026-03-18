@@ -72,23 +72,23 @@ TRAINING = [
 
 HELD_OUT = [
     dict(name='Mati 2018',             year=2018, continent='Europe',
-         lat=38.090,  lon=23.920,   wind=11.0, ros=0.70, civ=60),
+         lat=38.090,  lon=23.920,   wind=11.0, ros=0.70, civ=80),
     dict(name='Camp Fire 2018',        year=2018, continent='N. America',
-         lat=39.759,  lon=-121.622, wind=16.0, ros=0.85, civ=60),
+         lat=39.759,  lon=-121.622, wind=16.0, ros=0.85, civ=90),
     dict(name='Pedrogao 2017',         year=2017, continent='Europe',
-         lat=39.947,  lon=-8.148,   wind=22.0, ros=0.95, civ=60),
+         lat=39.947,  lon=-8.148,   wind=22.0, ros=0.95, civ=80),
     dict(name='Alexandroupoli 2023',   year=2023, continent='Europe',
-         lat=41.049,  lon=26.357,   wind=16.0, ros=1.05, civ=60),
+         lat=41.049,  lon=26.357,   wind=16.0, ros=1.05, civ=75),
     dict(name='Lahaina 2023',          year=2023, continent='N. America',
-         lat=20.888,  lon=-156.673, wind=27.0, ros=1.25, civ=60),
+         lat=20.888,  lon=-156.673, wind=27.0, ros=1.25, civ=80),
     dict(name='Black Saturday 2009',   year=2009, continent='Australia',
-         lat=-37.515, lon=145.365,  wind=18.0, ros=1.20, civ=60),
+         lat=-37.515, lon=145.365,  wind=18.0, ros=1.20, civ=75),
     dict(name='Tubbs Fire 2017',       year=2017, continent='N. America',
-         lat=38.479,  lon=-122.728, wind=25.0, ros=1.18, civ=60),
+         lat=38.479,  lon=-122.728, wind=25.0, ros=1.18, civ=75),
     dict(name='Peloponnese 2007',      year=2007, continent='Europe',
-         lat=37.489,  lon=21.648,   wind=14.0, ros=0.98, civ=60),
+         lat=37.489,  lon=21.648,   wind=14.0, ros=0.98, civ=65),
     dict(name='Valparaiso 2014',       year=2014, continent='S. America',
-         lat=-33.047, lon=-71.613,  wind=12.0, ros=0.90, civ=60),
+         lat=-33.047, lon=-71.613,  wind=12.0, ros=0.90, civ=70),
 ]
 
 # ---------------------------------------------------------------------------
@@ -424,21 +424,22 @@ def plot_diversity(output_file: str = 'dataset_diversity.png') -> None:
     cont_vals   = [counts[k] for k in cont_labels]
     cont_cols   = [CONTINENT_COLOURS.get(k, '#888') for k in cont_labels]
 
-    ax_inset = ax_info.inset_axes([0.02, 0.02, 0.38, 0.42])
+    # Pie inset — bottom-right corner, away from data clusters
+    ax_inset = ax_info.inset_axes([0.60, 0.02, 0.36, 0.40])
     ax_inset.set_facecolor('#0d0d1e')
     wedges, _ = ax_inset.pie(cont_vals, colors=cont_cols, startangle=90,
                               wedgeprops=dict(width=0.6, edgecolor='#1a1a2e', linewidth=0.8))
     ax_inset.set_title('Regions', color=FG, fontsize=6.5, pad=2)
 
-    # Continent legend below pie
+    # Continent legend to the right of the pie, inside the inset axes
     for k, col in zip(cont_labels, cont_cols):
-        ax_inset.plot([], [], 's', color=col, markersize=5,
+        ax_inset.plot([], [], 's', color=col, markersize=4,
                       label=f'{k} ({counts[k]})')
-    ax_inset.legend(fontsize=5.5, facecolor='#0d0d1e', labelcolor=FG,
-                    edgecolor='none', loc='lower center',
-                    bbox_to_anchor=(0.5, -0.65), ncol=1)
+    ax_inset.legend(fontsize=5.0, facecolor='#0d0d1e', labelcolor=FG,
+                    edgecolor='none', loc='center left',
+                    bbox_to_anchor=(1.0, 0.5), ncol=1)
 
-    # ── Dataset summary text box ──────────────────────────────────────────────
+    # ── Dataset summary text box — top-left, clear of data ───────────────────
     n_train = len(TRAINING)
     n_held  = len(HELD_OUT)
     all_yrs = sorted({s['year'] for s in TRAINING + HELD_OUT})
@@ -455,9 +456,9 @@ def plot_diversity(output_file: str = 'dataset_diversity.png') -> None:
         f"ROS:  {min(ros_all):.2f}–{max(ros_all):.2f} m/s\n"
         f"Curriculum: 3 phases (Bengio et al. 2009)"
     )
-    ax_info.text(0.98, 0.97, summary,
+    ax_info.text(0.02, 0.97, summary,
                  transform=ax_info.transAxes,
-                 fontsize=7, color=FG, va='top', ha='right',
+                 fontsize=7, color=FG, va='top', ha='left',
                  bbox=dict(boxstyle='round,pad=0.4', facecolor='#0d0d1e',
                            edgecolor=GRID, alpha=0.9),
                  family='monospace')

@@ -181,6 +181,7 @@ PEDROGAO_CONFIG_OVERRIDES = {
     # FWI equivalent: Extreme (>50 Van Wagner 1987 scale)
     'FIRE_SPREAD_PROB_BASE': 0.48,
     'ROTHERMEL_BASE_ROS': 0.95,         # Eucalyptus + pine; high ROS
+    'NUM_CIVILIANS': 80,                # ~7,500 residents across three municipalities
 }
 
 # ---------------------------------------------------------------------------

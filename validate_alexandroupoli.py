@@ -184,6 +184,7 @@ ALEX_CONFIG_OVERRIDES = {
     # Extreme fire conditions: 8+ day continuous event; drought-stressed fuel
     'FIRE_SPREAD_PROB_BASE': 0.50,
     'ROTHERMEL_BASE_ROS': 1.05,
+    'NUM_CIVILIANS': 75,                # ~5,000 residents in peri-urban study zone
 }
 
 # ---------------------------------------------------------------------------

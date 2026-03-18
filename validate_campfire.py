@@ -164,6 +164,7 @@ CAMPFIRE_CONFIG_OVERRIDES = {
     # Camp Fire FWI was in the Extreme range (Van Wagner 1987: FWI > 50)
     'FIRE_SPREAD_PROB_BASE':    0.55,    # Elevated for extreme conditions
     'ROTHERMEL_BASE_ROS':       0.85,    # High ROS for dry autumn Sierra Nevada
+    'NUM_CIVILIANS':            90,      # Paradise population ~26,918 (US Census 2017)
 }
 
 # ---------------------------------------------------------------------------
