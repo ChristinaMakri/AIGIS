@@ -1,5 +1,5 @@
 """
-Training curriculum across the 12 historical fire scenarios.
+Training curriculum across the 15 historical fire scenarios.
 =============================================================
 Implements difficulty-ordered curriculum learning:
   Bengio, Y., Louradour, J., Collobert, R., & Weston, J. (2009).
@@ -7,13 +7,14 @@ Implements difficulty-ordered curriculum learning:
   [Start with easy scenarios; add harder ones as training progresses.]
 
 Scenarios are ordered by fire intensity (ROTHERMEL_BASE_ROS × WIND_SPEED):
-  Phase 1 (easy):   Bages, Var, Penteli                  — low wind / low ROS
-  Phase 2 (medium): Manavgat, Rhodes, Kineta, Varibobi   — moderate wind
-  Phase 3 (hard):   Fort McMurray, Gospers Mtn, Carr,
-                    Glass, Woolsey                        — high wind + fast spread
+  Phase 1 (easy):   Bages, Var, Penteli                            — low wind / low ROS
+  Phase 2 (medium): Manavgat, Rhodes, Kineta, Varibobi, Dadia      — moderate wind
+  Phase 3 (hard):   Fort McMurray, Gospers Mtn, Carr, Glass,
+                    Woolsey, Thomas, Evia                           — high wind + fast spread
 
 Held out (never used in training — reserved for validation only):
-  Mati 2018, Camp Fire 2018, Pedrogao Grande 2017, Alexandroupoli 2023
+  Mati 2018, Camp Fire 2018, Pedrogao Grande 2017, Alexandroupoli 2023,
+  Lahaina 2023, Black Saturday 2009 (Kinglake, Victoria)
 """
 from __future__ import annotations
 from typing import Optional
@@ -115,6 +116,20 @@ SCENARIOS = [
             'NUM_CIVILIANS': 70,
         },
     },
+    {
+        'name': 'Dadia, Evros',
+        'phase': 2,
+        'lat': 41.300, 'lon': 26.200, 'radius': 3000,
+        'fire_locations': [(41.312, 26.212), (41.306, 26.206)],
+        # Dadia-Lefkimi-Soufli fire, August 2022: Etesian NNE wind ~12 m/s.
+        # ~35,000 ha burned. Reference: Copernicus EMS EMSR628 (2022).
+        'params': {
+            'WIND_SPEED': 12.0, 'WIND_INITIAL_DIRECTION': 200.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 28.0,
+            'FIRE_SPREAD_PROB_BASE': 0.40, 'ROTHERMEL_BASE_ROS': 0.82,
+            'NUM_CIVILIANS': 50,
+        },
+    },
     # ── Phase 3: Hard ────────────────────────────────────────────────────
     {
         'name': 'Fort McMurray, Alberta',
@@ -190,6 +205,34 @@ SCENARIOS = [
             'NUM_CIVILIANS': 90,
         },
     },
+    {
+        'name': 'Thomas Fire, Ventura CA',
+        'phase': 3,
+        'lat': 34.354, 'lon': -119.065, 'radius': 3000,
+        'fire_locations': [(34.366, -119.053), (34.360, -119.059)],
+        # December 4 2017: Santa Ana NE wind 20-25 m/s; 281,893 acres burned.
+        # Reference: CAL FIRE (2017). Thomas Fire Incident Report.
+        'params': {
+            'WIND_SPEED': 22.0, 'WIND_INITIAL_DIRECTION': 225.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
+            'FIRE_SPREAD_PROB_BASE': 0.52, 'ROTHERMEL_BASE_ROS': 1.12,
+            'NUM_CIVILIANS': 70,
+        },
+    },
+    {
+        'name': 'Evia Fire, Greece',
+        'phase': 3,
+        'lat': 38.953, 'lon': 23.150, 'radius': 3000,
+        'fire_locations': [(38.965, 23.162), (38.959, 23.156)],
+        # August 2021: Etesian NNE wind ~15 m/s; ~50,000 ha; 2 deaths.
+        # Reference: Copernicus EMS EMSR535 (2021); Greek Fire Service (2021).
+        'params': {
+            'WIND_SPEED': 15.0, 'WIND_INITIAL_DIRECTION': 200.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 22.0,
+            'FIRE_SPREAD_PROB_BASE': 0.48, 'ROTHERMEL_BASE_ROS': 0.95,
+            'NUM_CIVILIANS': 65,
+        },
+    },
 ]
 
 
@@ -199,7 +242,7 @@ class ScenarioCurriculum:
 
     Phase 1 (episodes 0   → phase1_end):   easy only
     Phase 2 (episodes ph1 → phase2_end):   easy + medium
-    Phase 3 (episodes ph2 → end):          all 12 scenarios
+    Phase 3 (episodes ph2 → end):          all 15 scenarios
 
     Bengio et al. (2009) — start simple, add complexity gradually.
     """

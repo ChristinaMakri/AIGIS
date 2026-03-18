@@ -1,7 +1,7 @@
 """
 AIGIS — Multi-Incident Diagnostic Validation
 =============================================
-Runs the simulation across all 16 fire incidents (12 training + 4 held-out)
+Runs the simulation across all 24 fire incidents (15 training + 9 held-out [OOD])
 and compares outputs against documented historical values.
 
 Purpose
@@ -37,12 +37,6 @@ import pandas as pd
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
-
-import src.fire_simulation as _fire_sim_mod
-import src.simulation as _sim_mod
-import src.agents.sentinel as _sentinel_mod
-import src.agents.analyst as _analyst_mod
-import src.config as _cfg
 
 from src.simulation import AIGISSimulation
 
@@ -360,30 +354,117 @@ INCIDENTS = [
             'burned_area_pct': 45.0,
         },
     },
+    {
+        'name': 'Lahaina 2023 (held-out)',
+        'split': 'OOD',
+        'lat': 20.888, 'lon': -156.673, 'radius': 3000,
+        'fire_locations': [(20.898, -156.661), (20.893, -156.667), (20.887, -156.672)],
+        'params': {
+            'WIND_SPEED': 27.0, 'WIND_INITIAL_DIRECTION': 245.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 20.0,
+            'FIRE_SPREAD_PROB_BASE': 0.58, 'ROTHERMEL_BASE_ROS': 1.25,
+            'NUM_CIVILIANS': 80,
+        },
+        # Lahaina, Maui 8 Aug 2023: 101 fatalities; ~13,000 population → 0.78 %
+        # 2,170 acres (878 ha) burned; Hurricane Dora-driven ENE wind.
+        # Source: NFPA (2024); Maui County (2024); NOAA (2023)
+        'documented': {
+            'mortality_rate': 0.0078,
+            'burned_area_pct': 31.0,
+        },
+    },
+    {
+        'name': 'Black Saturday 2009 (held-out)',
+        'split': 'OOD',
+        'lat': -37.515, 'lon': 145.365, 'radius': 3000,
+        'fire_locations': [(-37.503, 145.377), (-37.509, 145.371), (-37.515, 145.365)],
+        'params': {
+            'WIND_SPEED': 18.0, 'WIND_INITIAL_DIRECTION': 135.0,
+            'WIND_OSCILLATION_AMPLITUDE': 14.0, 'WIND_OSCILLATION_PERIOD': 18.0,
+            'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 1.20,
+            'NUM_CIVILIANS': 75,
+        },
+        # Kinglake complex, 7 Feb 2009: 119 fatalities; ~12,000 at risk → 0.99 %
+        # NW wind 18 m/s; 46.4°C; FFDI 190+; Code Red conditions.
+        # Source: Teague et al. (2010) Royal Commission; Cruz et al. (2012)
+        'documented': {
+            'mortality_rate': 0.0099,
+            'burned_area_pct': 50.0,
+        },
+    },
+    {
+        'name': 'Tubbs Fire 2017 (held-out)',
+        'split': 'OOD',
+        'lat': 38.479, 'lon': -122.728, 'radius': 3000,
+        'fire_locations': [(38.491, -122.716), (38.485, -122.722), (38.479, -122.728)],
+        'params': {
+            'WIND_SPEED': 25.0, 'WIND_INITIAL_DIRECTION': 225.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
+            'FIRE_SPREAD_PROB_BASE': 0.56, 'ROTHERMEL_BASE_ROS': 1.18,
+            'NUM_CIVILIANS': 75,
+        },
+        # Coffey Park, Santa Rosa, Oct 8-9 2017: 22 deaths / ~8,000 residents = 0.28 %
+        # Diablo NE wind 25 m/s; 36,807 acres total burned.
+        # Source: CAL FIRE (2018); Nauslar et al. (2018) Weather and Forecasting
+        'documented': {
+            'mortality_rate': 0.0028,
+            'burned_area_pct': 41.0,
+        },
+    },
+    {
+        'name': 'Peloponnese 2007 (held-out)',
+        'split': 'OOD',
+        'lat': 37.489, 'lon': 21.648, 'radius': 3000,
+        'fire_locations': [(37.500, 21.659), (37.494, 21.653), (37.488, 21.648)],
+        'params': {
+            'WIND_SPEED': 14.0, 'WIND_INITIAL_DIRECTION': 200.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 28.0,
+            'FIRE_SPREAD_PROB_BASE': 0.48, 'ROTHERMEL_BASE_ROS': 0.98,
+            'NUM_CIVILIANS': 65,
+        },
+        # Zacharo/Ilia complex, Aug 2007: ~30 deaths / ~5,000 in study zone = 0.60 %
+        # 77 deaths total in Greece; 270,000 ha burned; extreme drought.
+        # Source: Koutsias et al. (2012) Agric. Forest Meteorol.; EEA (2007)
+        'documented': {
+            'mortality_rate': 0.0060,
+            'burned_area_pct': 45.0,
+        },
+    },
+    {
+        'name': 'Valparaiso 2014 (held-out)',
+        'split': 'OOD',
+        'lat': -33.047, 'lon': -71.613, 'radius': 3000,
+        'fire_locations': [(-33.040, -71.606), (-33.045, -71.611), (-33.050, -71.616)],
+        'params': {
+            'WIND_SPEED': 12.0, 'WIND_INITIAL_DIRECTION': 315.0,
+            'WIND_OSCILLATION_AMPLITUDE': 8.0, 'WIND_OSCILLATION_PERIOD': 30.0,
+            'FIRE_SPREAD_PROB_BASE': 0.45, 'ROTHERMEL_BASE_ROS': 0.90,
+            'NUM_CIVILIANS': 70,
+        },
+        # Cerro Mariposas, April 12-13 2014: 15 deaths / ~8,000 residents = 0.19 %
+        # SE wind 12 m/s (La Nina drought); 2,900+ structures destroyed.
+        # Source: Encinas et al. (2015) IJDRR; CONAF (2014)
+        'documented': {
+            'mortality_rate': 0.0019,
+            'burned_area_pct': 30.0,
+        },
+    },
 ]
-
-
-def _patch_modules(params: dict) -> None:
-    for key, val in params.items():
-        for mod in [_fire_sim_mod, _sim_mod, _sentinel_mod, _analyst_mod, _cfg]:
-            if hasattr(mod, key):
-                setattr(mod, key, val)
 
 
 def _run_scenario(incident: dict, num_runs: int) -> pd.DataFrame:
     rows = []
     for i in range(num_runs):
-        _patch_modules(incident['params'])
         sim = AIGISSimulation(
             lat=incident['lat'],
             lon=incident['lon'],
             radius=incident['radius'],
-            mode='standard',
+            mode='batch',
+            run_id=i,
             fire_locations=incident['fire_locations'],
+            config_overrides=incident['params'],
         )
-        while not sim.is_complete():
-            sim.step()
-        r = sim.get_results()
+        r = sim.run_until_complete()
         r['run_id'] = i
         rows.append(r)
     return pd.DataFrame(rows)

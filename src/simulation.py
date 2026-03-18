@@ -612,8 +612,12 @@ class AIGISSimulation:
 
             if civilian.grid_position:
                 r, c = civilian.grid_position
-                # Check if in burning or burnt area
-                if self.environment.fire_grid[r, c] in [1, 2]:
+                # Casualty only when actively burning (state=1).
+                # State=2 (burnt-out) cells are ash — the fire has passed;
+                # a civilian still present is not automatically killed.
+                # Blocking movement onto state=2 cells (civilian.py) prevents
+                # civilians from routing through ash and being falsely counted.
+                if self.environment.fire_grid[r, c] == 1:
                     civilian.is_active = False
                     count += 1
 

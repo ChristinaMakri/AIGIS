@@ -676,8 +676,10 @@ class CivilianAgent(Agent):
         new_row = np.clip(row + dr, 0, environment.grid_shape[0] - 1)
         new_col = np.clip(col + dc, 0, environment.grid_shape[1] - 1)
 
-        # Check if not obstacle or fire
-        if environment.obstacle_grid[new_row, new_col] == 0 and environment.fire_grid[new_row, new_col] != 1:
+        # Check if not obstacle, actively burning, or burnt-out (state 2 = ash,
+        # hot embers — impassable until cooled; civilians cannot route through ash).
+        if (environment.obstacle_grid[new_row, new_col] == 0
+                and environment.fire_grid[new_row, new_col] not in (1, 2)):
             self.grid_position = (new_row, new_col)
             self.position = environment.grid_to_latlon(new_row, new_col)
 
@@ -712,7 +714,7 @@ class CivilianAgent(Agent):
                 new_r = int(np.clip(r + step_r, 0, h - 1))
                 new_c = int(np.clip(c + step_c, 0, w - 1))
                 if (environment.obstacle_grid[new_r, new_c] == 0
-                        and environment.fire_grid[new_r, new_c] != 1):
+                        and environment.fire_grid[new_r, new_c] not in (1, 2)):
                     old_pos = self.grid_position
                     self.grid_position = (new_r, new_c)
                     self.position = environment.grid_to_latlon(new_r, new_c)
@@ -766,8 +768,8 @@ class CivilianAgent(Agent):
         new_col = int(np.clip(col + movement[0], 0, environment.grid_shape[1] - 1))
 
         # Check if valid (not obstacle or fire)
-        if (environment.obstacle_grid[new_row, new_col] == 0 and
-            environment.fire_grid[new_row, new_col] != 1):
+        if (environment.obstacle_grid[new_row, new_col] == 0
+                and environment.fire_grid[new_row, new_col] not in (1, 2)):
             # Track last movement for other agents to follow
             self.last_movement = np.array([new_col - col, new_row - row], dtype=np.float32)
             self.grid_position = (new_row, new_col)
@@ -841,8 +843,10 @@ class CivilianAgent(Agent):
                 next_lat, next_lon = node_data['y'], node_data['x']
                 next_r, next_c = environment.latlon_to_grid(next_lat, next_lon)
 
-                # If next node is burning, recalculate path immediately
-                if environment.fire_grid[next_r, next_c] == 1:  # BURNING
+                # If next node is burning or burnt-out, recalculate path.
+                # Burnt-out (state=2) cells are impassable hot ash — civilians
+                # must find an alternative route around the burned area.
+                if environment.fire_grid[next_r, next_c] in (1, 2):  # BURNING or BURNT
                     self.current_path = []  # Clear stale path
                     try:
                         # Find new path avoiding fire

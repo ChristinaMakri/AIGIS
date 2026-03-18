@@ -88,7 +88,19 @@ class RiskPredictor:
                 if model_key in self.models:
                     model_data = self.models[model_key]
                     X_scaled = model_data['scaler'].transform([features])
-                    value = model_data['model'].predict(X_scaled)[0]
+                    if model_data.get('model_type') == 'hurdle':
+                        # Two-stage hurdle model (Mullahy 1986)
+                        # Stage 1: P(casualties > 0)
+                        p_pos = model_data['classifier'].predict_proba(X_scaled)[0, 1]
+                        # Stage 2: E[casualties | casualties > 0]
+                        reg = model_data.get('regressor')
+                        if reg is not None:
+                            e_count = max(0.0, float(reg.predict(X_scaled)[0]))
+                        else:
+                            e_count = 0.0
+                        value = p_pos * e_count
+                    else:
+                        value = model_data['model'].predict(X_scaled)[0]
                     predictions[out_key] = max(0, float(value))
                 else:
                     predictions[out_key] = 0.0

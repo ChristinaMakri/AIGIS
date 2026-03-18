@@ -2,9 +2,11 @@
 AIGIS — Hybrid BDI+RL Evaluation
 ==================================
 Evaluates the trained hybrid system on:
-  1. All 12 training scenarios (in-distribution check, one per curriculum phase)
-  2. 4 held-out real-incident scenarios (OOD generalisation):
-       Mati 2018, Camp Fire 2018, Pedrogao Grande 2017, Alexandroupoli 2023
+  1. All 15 training scenarios (in-distribution check, one per curriculum phase)
+  2. 9 held-out real-incident scenarios (OOD generalisation):
+       Mati 2018, Camp Fire 2018, Pedrogao Grande 2017, Alexandroupoli 2023,
+       Lahaina 2023, Black Saturday 2009, Tubbs Fire 2017, Peloponnese 2007,
+       Valparaiso 2014
 
 Reports: mean, std, 95% CI across N independent runs per scenario.
   Bengio, Y. et al. (2009). "Curriculum learning." ICML.
@@ -96,6 +98,74 @@ HELD_OUT = [
             'NUM_CIVILIANS': 60,
         },
     },
+    {
+        # NFPA (2024); Maui County (2024); NOAA (2023); USFA (2024)
+        # Hurricane Dora downburst; ENE wind 27 m/s; 100 fatalities
+        # 100 fatalities / ~12,800 residents = 0.78 %
+        'name': 'Lahaina 2023 (held-out)',
+        'lat': 20.888, 'lon': -156.673, 'radius': 3000,
+        'fire_locations': [(20.896, -156.665), (20.891, -156.670), (20.885, -156.675)],
+        'params': {
+            'WIND_SPEED': 27.0, 'WIND_INITIAL_DIRECTION': 245.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 15.0,
+            'FIRE_SPREAD_PROB_BASE': 0.58, 'ROTHERMEL_BASE_ROS': 1.25,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        # Teague et al. (2010) Royal Commission; Cruz et al. (2012); Blanchi et al. (2010)
+        # NW wind 18 m/s; FFDI 190+; temperature 46.4 °C
+        # 119 fatalities / ~12,000 population in Kinglake complex = 0.99 %
+        'name': 'Black Saturday 2009 (held-out)',
+        'lat': -37.515, 'lon': 145.365, 'radius': 3000,
+        'fire_locations': [(-37.503, 145.377), (-37.509, 145.371), (-37.515, 145.365)],
+        'params': {
+            'WIND_SPEED': 18.0, 'WIND_INITIAL_DIRECTION': 135.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 18.0,
+            'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 1.20,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        # CAL FIRE (2018); Nauslar et al. (2018) Weather and Forecasting 33(5):2123-2148
+        # Diablo NE wind 25 m/s; 36,807 acres burned; 22 deaths / ~8,000 = 0.28 %
+        'name': 'Tubbs Fire 2017 (held-out)',
+        'lat': 38.479, 'lon': -122.728, 'radius': 3000,
+        'fire_locations': [(38.491, -122.716), (38.485, -122.722), (38.479, -122.728)],
+        'params': {
+            'WIND_SPEED': 25.0, 'WIND_INITIAL_DIRECTION': 225.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
+            'FIRE_SPREAD_PROB_BASE': 0.56, 'ROTHERMEL_BASE_ROS': 1.18,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        # Koutsias et al. (2012) Agric. Forest Meteorol. 156:41-53; EEA (2007)
+        # Etesian NNE wind 14 m/s; 270,000 ha across Greece; 77 deaths
+        # ~30 deaths / ~5,000 in Zacharo/Ilia = 0.60 %
+        'name': 'Peloponnese 2007 (held-out)',
+        'lat': 37.489, 'lon': 21.648, 'radius': 3000,
+        'fire_locations': [(37.500, 21.659), (37.494, 21.653), (37.488, 21.648)],
+        'params': {
+            'WIND_SPEED': 14.0, 'WIND_INITIAL_DIRECTION': 200.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 28.0,
+            'FIRE_SPREAD_PROB_BASE': 0.48, 'ROTHERMEL_BASE_ROS': 0.98,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        # Encinas et al. (2015) Int J Disaster Risk Reduction 13:280-289; CONAF (2014)
+        # SE wind 12 m/s (La Nina drought); 15 deaths / ~8,000 = 0.19 %
+        'name': 'Valparaiso 2014 (held-out)',
+        'lat': -33.047, 'lon': -71.613, 'radius': 3000,
+        'fire_locations': [(-33.040, -71.606), (-33.045, -71.611), (-33.050, -71.616)],
+        'params': {
+            'WIND_SPEED': 12.0, 'WIND_INITIAL_DIRECTION': 315.0,
+            'WIND_OSCILLATION_AMPLITUDE': 8.0, 'WIND_OSCILLATION_PERIOD': 30.0,
+            'FIRE_SPREAD_PROB_BASE': 0.45, 'ROTHERMEL_BASE_ROS': 0.90,
+            'NUM_CIVILIANS': 60,
+        },
+    },
 ]
 
 
@@ -141,17 +211,17 @@ def evaluate(
     print('AIGIS — Hybrid BDI+RL Evaluation')
     print('=' * 70)
     print('Grimm et al. (2020) ODD  |  Schulman et al. (2017) PPO')
-    print('12 training scenarios (phases 1-3) + 4 held-out real incidents')
+    print('15 training scenarios (phases 1-3) + 9 held-out real incidents')
     print(f'Runs per scenario: {num_runs}  |  Policy dir: {policy_dir}')
     print('=' * 70 + '\n')
 
     agents = _load_agents(policy_dir, device)
 
     all_rows = []
-    # All 12 curriculum training scenarios + 4 held-out real incidents = 16 total.
+    # All 15 curriculum training scenarios + 9 held-out real incidents = 24 total.
     # Training split confirms in-distribution generalisation across phases 1–3.
     # Held-out split measures OOD generalisation to real documented events.
-    eval_scenarios = list(SCENARIOS) + HELD_OUT  # 12 training + 4 held-out
+    eval_scenarios = list(SCENARIOS) + HELD_OUT  # 15 training + 9 held-out
 
     for scenario in eval_scenarios:
         name = scenario['name']

@@ -2,8 +2,8 @@
 AIGIS — ML Model Training Script
 ==================================
 Generates a training dataset by running N simulations with randomised
-parameters, then trains four regression models to predict simulation
-outcomes from mid-run state features.
+parameters, then trains models to predict simulation outcomes from
+mid-run state features.
 
 The trained models replace the pre-packaged models/*.pkl files, which
 were trained on an external US wildfire incident database (33 features)
@@ -34,9 +34,28 @@ Feature vector (14 features, extracted at step = MAX_STEPS // 2)
 
 Target variables
 ----------------
-  casualty_risk    → final casualty count          (XGBRegressor)
-  evacuation_count → final evacuated count         (RandomForestRegressor)
-  containment_time → final simulation steps        (RandomForestRegressor)
+  casualty_risk    → final casualty count  (two-stage hurdle model)
+                     Stage 1: XGBClassifier → P(casualties > 0)
+                     Stage 2: XGBRegressor (Poisson) → E[casualties | casualties > 0]
+                     Final:   P × E[Y|Y>0]   (Mullahy 1986; Cameron & Trivedi 2013)
+  evacuation_count → final evacuated count  (RandomForestRegressor)
+  containment_time → final simulation steps (RandomForestRegressor)
+
+Casualty risk modelling rationale
+----------------------------------
+  Wildfire casualty counts are zero-inflated: most evacuations produce no
+  fatalities (structural zero), with a heavy right tail when casualties do
+  occur.  Standard regression (OLS / XGBoost squared-error) is known to
+  produce negative R² in this regime because predicting the marginal mean
+  is penalised by the many zeros.
+
+  The hurdle model (Mullahy 1986) separates the two processes:
+    - Whether any casualty occurs (binary, logistic link)
+    - How many casualties given at least one (count regression, Poisson link)
+  This decomposition is the recommended practice for zero-inflated count
+  outcomes in epidemiology and disaster modelling (Cameron & Trivedi 2013,
+  §4.5; Neelon et al. 2016).  Each stage is evaluated with metrics
+  appropriate to its task (AUC-ROC for stage 1; MAE / R² for stage 2).
 
 Training methodology
 --------------------
@@ -47,6 +66,19 @@ Training methodology
 
 References
 ----------
+  Mullahy, J. (1986). "Specification and testing of some modified count data
+    models." Journal of Econometrics, 33(3), 341-365.
+    DOI: 10.1016/0304-4076(86)90002-3
+
+  Cameron, A.C. & Trivedi, P.K. (2013). "Regression Analysis of Count Data"
+    (2nd ed.). Cambridge University Press.
+    DOI: 10.1017/CBO9781139013567
+
+  Neelon, B., O'Malley, A.J., & Smith, V.A. (2016). "Modeling zero-modified
+    count and semicontinuous data in health services research Part 1: Back-
+    ground and overview." Statistics in Medicine, 35(27), 5070-5093.
+    DOI: 10.1002/sim.7050
+
   Chen, T. & Guestrin, C. (2016). "XGBoost: A Scalable Tree Boosting
     System." Proceedings of KDD '16, pp. 785-794.
     DOI: 10.1145/2939672.2939785
@@ -98,12 +130,15 @@ import matplotlib.pyplot as plt
 import matplotlib.gridspec as gridspec
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.linear_model import Ridge
-from sklearn.metrics import mean_absolute_error, mean_squared_error, r2_score
+from sklearn.metrics import (
+    mean_absolute_error, mean_squared_error, r2_score,
+    roc_auc_score, classification_report,
+)
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 
 try:
-    from xgboost import XGBRegressor
+    from xgboost import XGBRegressor, XGBClassifier
     XGBOOST_AVAILABLE = True
 except ImportError:
     XGBOOST_AVAILABLE = False
@@ -327,6 +362,103 @@ TRAINING_LOCATIONS = [
             'NUM_CIVILIANS': 45,
         },
     },
+    {
+        # Manavgat, Turkey — July-August 2021 (Etesian NNE wind)
+        # Source: Copernicus EMS (2021). EMSR532 Manavgat Fire, Turkey.
+        #   Wind ~10 m/s from NNE (200° TO direction, SSW); ~138,000 ha burned;
+        #   temperature 40-45°C; RH 10-20%. 8 fatalities.
+        'lat': 36.786, 'lon': 31.437, 'radius': 3000,
+        'fire_locations': [(36.798, 31.449), (36.792, 31.443)],
+        'historical_params': {
+            'WIND_SPEED': 10.0,             # Etesian NNE ~10 m/s (Copernicus EMSR532)
+            'WIND_INITIAL_DIRECTION': 200.0, # NNE→SSW (AIGIS: going TO SSW)
+            'WIND_OSCILLATION_AMPLITUDE': 12.0,
+            'FIRE_SPREAD_PROB_BASE': 0.42,
+            'ROTHERMEL_BASE_ROS': 0.85,
+            'NUM_CIVILIANS': 55,
+        },
+    },
+    {
+        # Fort McMurray, Alberta — Horse River Fire, May 2016 (SW wind)
+        # Source: Natural Resources Canada (2017). NOR-X-430E, Northern Forestry
+        #   Centre. Wind 25-30 km/h (~7-8 m/s), gusts to 70 km/h; temp 33°C;
+        #   RH 15%. 88,000 evacuated; 0 direct fatalities.
+        'lat': 56.726, 'lon': -111.379, 'radius': 3000,
+        'fire_locations': [(56.738, -111.367), (56.732, -111.373)],
+        'historical_params': {
+            'WIND_SPEED': 20.0,             # SW wind ~7-8 m/s mean (NRCan 2017)
+            'WIND_INITIAL_DIRECTION': 45.0,  # SW→NE (AIGIS: going TO NE)
+            'WIND_OSCILLATION_AMPLITUDE': 15.0,
+            'FIRE_SPREAD_PROB_BASE': 0.52,
+            'ROTHERMEL_BASE_ROS': 1.10,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        # Gospers Mountain, NSW — Black Summer 2019-2020 (pre-frontal NW wind)
+        # Source: AFAC (2020). "Australian Seasonal Bushfire Outlook."
+        #   NSW RFS (2020). Gospers Mountain Fire — incident review.
+        #   NW wind 15-20 m/s; Fire Danger Index > 100. 512,000 ha burned.
+        'lat': -33.250, 'lon': 150.400, 'radius': 3000,
+        'fire_locations': [(-33.238, 150.412), (-33.244, 150.406)],
+        'historical_params': {
+            'WIND_SPEED': 17.0,             # NW pre-frontal ~17 m/s (AFAC 2020)
+            'WIND_INITIAL_DIRECTION': 135.0, # NW→SE (AIGIS: going TO SE)
+            'WIND_OSCILLATION_AMPLITUDE': 12.0,
+            'FIRE_SPREAD_PROB_BASE': 0.50,
+            'ROTHERMEL_BASE_ROS': 1.05,
+            'NUM_CIVILIANS': 55,
+        },
+    },
+    {
+        # Thomas Fire, Ventura County CA — December 4 2017 (Santa Ana wind event)
+        # Source: CAL FIRE (2017). Thomas Fire Incident Report. Sacramento, CA.
+        #   NWS Los Angeles (2017). "Thomas Fire Weather Summary."
+        #   Santa Ana NE wind 20-25 m/s; 281,893 acres burned; 2 direct fatalities.
+        #   Largest CA wildfire on record at time of containment.
+        'lat': 34.354, 'lon': -119.065, 'radius': 3000,
+        'fire_locations': [(34.366, -119.053), (34.360, -119.059)],
+        'historical_params': {
+            'WIND_SPEED': 22.0,             # Santa Ana NE ~22 m/s (NWS LA 2017)
+            'WIND_INITIAL_DIRECTION': 225.0, # NE→SW (AIGIS: going TO SW)
+            'WIND_OSCILLATION_AMPLITUDE': 12.0,
+            'FIRE_SPREAD_PROB_BASE': 0.52,
+            'ROTHERMEL_BASE_ROS': 1.12,
+            'NUM_CIVILIANS': 70,
+        },
+    },
+    {
+        # Evia (Euboea) Fire, Greece — August 2021 (Etesian wind, extreme drought)
+        # Source: Copernicus EMS (2021). EMSR535 Evia Wildfire, Greece.
+        #   Greek Fire Service (2021). End-of-season report.
+        #   Etesian NNE wind ~15 m/s; ~50,000 ha burned; 2 deaths.
+        'lat': 38.953, 'lon': 23.150, 'radius': 3000,
+        'fire_locations': [(38.965, 23.162), (38.959, 23.156)],
+        'historical_params': {
+            'WIND_SPEED': 15.0,             # Etesian NNE ~15 m/s (Copernicus EMSR535)
+            'WIND_INITIAL_DIRECTION': 200.0, # NNE→SSW (AIGIS: going TO SSW)
+            'WIND_OSCILLATION_AMPLITUDE': 10.0,
+            'FIRE_SPREAD_PROB_BASE': 0.48,
+            'ROTHERMEL_BASE_ROS': 0.95,
+            'NUM_CIVILIANS': 65,
+        },
+    },
+    {
+        # Dadia/Evros Forest Fire, NE Greece — August 2022 (Etesian NNE wind)
+        # Source: Greek Fire Service (2022). Dadia-Lefkimi-Soufli incident report.
+        #   Copernicus EMS EMSR628 (2022). ~35,000 ha burned; Etesian ~12 m/s.
+        #   Preceded the 2023 Alexandroupoli fire in the same region.
+        'lat': 41.300, 'lon': 26.200, 'radius': 3000,
+        'fire_locations': [(41.312, 26.212), (41.306, 26.206)],
+        'historical_params': {
+            'WIND_SPEED': 12.0,             # Etesian NNE ~12 m/s (Copernicus EMSR628)
+            'WIND_INITIAL_DIRECTION': 200.0, # NNE→SSW (AIGIS: going TO SSW)
+            'WIND_OSCILLATION_AMPLITUDE': 10.0,
+            'FIRE_SPREAD_PROB_BASE': 0.40,
+            'ROTHERMEL_BASE_ROS': 0.82,
+            'NUM_CIVILIANS': 50,
+        },
+    },
 ]
 
 BG, PANEL, FG = '#1a1a2e', '#16213e', '#e0e0e0'
@@ -516,28 +648,145 @@ def generate_dataset(
 
 def _build_model(model_type: str):
     """Instantiate a fresh untrained model of the given type."""
-    if model_type == 'xgboost':
-        if XGBOOST_AVAILABLE:
-            return XGBRegressor(
-                n_estimators=200, max_depth=6, learning_rate=0.05,
-                subsample=0.8, colsample_bytree=0.8,
-                random_state=42, verbosity=0,
-            )
-        else:
-            print('  Warning: XGBoost not installed; using Ridge regression '
-                  'for casualty_risk model.')
-            return Ridge(alpha=1.0)
-    else:
+    if model_type == 'random_forest':
         return RandomForestRegressor(
             n_estimators=200, max_depth=15, min_samples_leaf=2,
             random_state=42, n_jobs=-1,
         )
+    else:
+        # Fallback Ridge for non-XGBoost environments
+        return Ridge(alpha=1.0)
+
+
+def _train_hurdle_model(
+    X_train_s: np.ndarray,
+    X_test_s:  np.ndarray,
+    y_train:   np.ndarray,
+    y_test:    np.ndarray,
+    label:     str,
+) -> dict:
+    """
+    Two-stage hurdle model for zero-inflated casualty counts.
+
+    Stage 1 — XGBClassifier: P(casualties > 0)
+      Evaluated with AUC-ROC, precision, recall, F1 (binary classification).
+      scale_pos_weight corrects for the class imbalance between zero and
+      non-zero casualty runs.
+
+    Stage 2 — XGBRegressor (Poisson objective): E[casualties | casualties > 0]
+      Fit on the non-zero training cases only.
+      Evaluated on non-zero test cases: R², MAE.
+
+    Combined prediction: P(Y>0) × E[Y|Y>0]   (Mullahy 1986)
+
+    References
+    ----------
+    Mullahy, J. (1986). Journal of Econometrics, 33(3), 341-365.
+    Cameron, A.C. & Trivedi, P.K. (2013). Regression Analysis of Count Data.
+    Neelon et al. (2016). Statistics in Medicine, 35(27), 5070-5093.
+    """
+    if not XGBOOST_AVAILABLE:
+        raise RuntimeError(
+            'XGBoost is required for the hurdle casualty model. '
+            'Install with: pip install xgboost'
+        )
+
+    # ── Binary labels ──────────────────────────────────────────────────────
+    y_train_bin = (y_train > 0).astype(int)
+    y_test_bin  = (y_test  > 0).astype(int)
+
+    n_neg = int((y_train_bin == 0).sum())
+    n_pos = int((y_train_bin == 1).sum())
+    # Avoid division by zero if all zeros (degenerate training set)
+    spw   = max(1.0, n_neg / n_pos) if n_pos > 0 else 1.0
+
+    # ── Stage 1: classifier ────────────────────────────────────────────────
+    clf = XGBClassifier(
+        n_estimators=200, max_depth=4, learning_rate=0.05,
+        subsample=0.8, colsample_bytree=0.8,
+        scale_pos_weight=spw,
+        random_state=42, verbosity=0, eval_metric='logloss',
+    )
+    clf.fit(X_train_s, y_train_bin)
+
+    y_prob      = clf.predict_proba(X_test_s)[:, 1]
+    y_pred_bin  = (y_prob >= 0.5).astype(int)
+
+    auc = roc_auc_score(y_test_bin, y_prob) if y_test_bin.sum() > 0 else float('nan')
+    clf_report = classification_report(y_test_bin, y_pred_bin,
+                                       target_names=['no casualty', 'casualty'],
+                                       zero_division=0)
+
+    print(f'\n{label} — Stage 1 (classifier: P(casualties > 0)):')
+    print(f'  Training set: {n_neg} zeros / {n_pos} positives  '
+          f'(scale_pos_weight={spw:.1f})')
+    print(f'  AUC-ROC = {auc:.4f}  (Hanley & McNeil 1982)')
+    print(clf_report)
+
+    # ── Stage 2: count regressor (non-zero cases only) ─────────────────────
+    nz_train = y_train > 0
+    nz_test  = y_test  > 0
+
+    stage2_metrics = {'r2': float('nan'), 'mae': float('nan')}
+
+    if nz_train.sum() >= 5:
+        reg = XGBRegressor(
+            n_estimators=200, max_depth=4, learning_rate=0.05,
+            objective='count:poisson',
+            subsample=0.8, colsample_bytree=0.8,
+            random_state=42, verbosity=0,
+        )
+        reg.fit(X_train_s[nz_train], y_train[nz_train])
+
+        print(f'{label} — Stage 2 (Poisson regressor: E[Y | Y > 0]):')
+        print(f'  Training on {nz_train.sum()} non-zero cases')
+
+        if nz_test.sum() >= 2:
+            y_pred_count = reg.predict(X_test_s[nz_test])
+            stage2_metrics['r2']  = float(r2_score(y_test[nz_test], y_pred_count))
+            stage2_metrics['mae'] = float(mean_absolute_error(y_test[nz_test], y_pred_count))
+            print(f'  R²  = {stage2_metrics["r2"]:.4f}  (on {nz_test.sum()} non-zero test cases)')
+            print(f'  MAE = {stage2_metrics["mae"]:.4f}  (Willmott & Matsuura 2005)')
+        else:
+            print(f'  (fewer than 2 non-zero test cases; stage-2 metrics not reported)')
+    else:
+        print(f'{label} — Stage 2: insufficient non-zero training cases '
+              f'({nz_train.sum()}); using zero-count fallback.')
+        reg = None
+
+    # ── Combined predictions (for plotting) ───────────────────────────────
+    p_pos = clf.predict_proba(X_test_s)[:, 1]
+    if reg is not None:
+        e_count = np.maximum(0, reg.predict(X_test_s))
+    else:
+        e_count = np.zeros(len(X_test_s))
+    y_pred_combined = p_pos * e_count
+
+    return {
+        'classifier':      clf,
+        'regressor':       reg,
+        'auc':             auc,
+        'clf_report':      clf_report,
+        'stage2_r2':       stage2_metrics['r2'],
+        'stage2_mae':      stage2_metrics['mae'],
+        'y_test':          y_test,
+        'y_pred':          y_pred_combined,
+        'y_prob':          y_prob,
+        'y_test_bin':      y_test_bin,
+        'nz_test':         nz_test,
+        'label':           label,
+        'n_pos':           n_pos,
+        'n_neg':           n_neg,
+        # For combined MAE / R² across all test cases
+        'test_r2':         float(r2_score(y_test, y_pred_combined)),
+        'test_mae':        float(mean_absolute_error(y_test, y_pred_combined)),
+    }
 
 
 MODEL_SPECS = [
     # (model_key, filename, target_col, model_type, label)
     ('casualty_risk',    'casualty_risk_model.pkl',
-     'target_casualties', 'xgboost',      'Casualty Risk'),
+     'target_casualties', 'hurdle',        'Casualty Risk'),
     ('evacuation_count', 'evacuation_count_model.pkl',
      'target_evacuated',  'random_forest', 'Evacuation Count'),
     ('containment_time', 'containment_time_model.pkl',
@@ -577,9 +826,32 @@ def train_and_save(
     trained_models = {}
 
     for model_key, filename, target_col, model_type, label in MODEL_SPECS:
-        y      = df[target_col].values
+        y       = df[target_col].values
         y_train = y[idx_train]
         y_test  = y[idx_test]
+
+        if model_type == 'hurdle':
+            # Two-stage hurdle model (Mullahy 1986; Cameron & Trivedi 2013)
+            h = _train_hurdle_model(
+                X_train_s, X_test_s, y_train, y_test, label
+            )
+            payload = {
+                'classifier':    h['classifier'],
+                'regressor':     h['regressor'],
+                'scaler':        scaler,
+                'feature_names': FEATURE_NAMES,
+                'model_type':    'hurdle',
+                'test_r2':       h['test_r2'],
+                'test_mae':      h['test_mae'],
+            }
+            out_path = output_dir / filename
+            with open(out_path, 'wb') as fh:
+                pickle.dump(payload, fh)
+            print(f'  Saved to: {out_path}')
+
+            metrics[model_key] = h
+            trained_models[model_key] = h['classifier']
+            continue
 
         model = _build_model(model_type)
         model.fit(X_train_s, y_train)
@@ -628,69 +900,123 @@ def train_and_save(
 
 def _plot_training(metrics: dict, df: pd.DataFrame, out_path: str) -> None:
     """
-    2×4 figure:
-      Row 0: predicted vs. actual scatter (one panel per model)
-      Row 1: feature importances (where available)
+    2×3 figure (one column per model):
+      Casualty Risk (hurdle model):
+        Row 0: Stage-1 ROC curve (AUC-ROC)
+        Row 1: Stage-2 predicted vs actual scatter (non-zero cases)
+      Other models:
+        Row 0: predicted vs actual scatter
+        Row 1: feature importances
     """
+    from sklearn.metrics import roc_curve
+
     keys = [m[0] for m in MODEL_SPECS]
 
     fig = plt.figure(figsize=(18, 10), facecolor=BG)
     fig.suptitle(
-        'ML Model Training Evaluation  |  Chen & Guestrin (2016)  |  '
-        'Breiman (2001)  |  Willmott & Matsuura (2005)',
-        color=FG, fontsize=10, fontweight='bold'
+        'ML Model Training Evaluation  |  Hurdle Model (Mullahy 1986)  |  '
+        'Chen & Guestrin (2016)  |  Breiman (2001)  |  Willmott & Matsuura (2005)',
+        color=FG, fontsize=9, fontweight='bold'
     )
-    gs = gridspec.GridSpec(2, 4, figure=fig, hspace=0.50, wspace=0.35)
+    gs = gridspec.GridSpec(2, 3, figure=fig, hspace=0.50, wspace=0.35)
 
-    colours = ['#ff006e', '#06d6a0', '#ffd60a', '#8b5cf6']
+    colours = ['#ff006e', '#06d6a0', '#ffd60a']
 
     for col_i, (model_key, colour) in enumerate(zip(keys, colours)):
         m = metrics[model_key]
 
-        # Row 0: scatter predicted vs actual
-        ax = fig.add_subplot(gs[0, col_i])
-        ax.set_facecolor(PANEL)
-        ax.tick_params(colors=FG, labelsize=7)
-        for sp in ax.spines.values():
-            sp.set_edgecolor('#3a3a5c')
-
-        ax.scatter(m['y_pred'], m['y_test'], color=colour, s=20, alpha=0.6)
-        lim = max(m['y_test'].max(), m['y_pred'].max()) * 1.1
-        ax.plot([0, lim], [0, lim], color='white', linestyle='--',
-                linewidth=1, alpha=0.5)
-        ax.text(0.05, 0.90,
-                f"R²={m['test_r2']:.3f}\nMAE={m['test_mae']:.2f}",
-                transform=ax.transAxes, color=FG, fontsize=7,
-                verticalalignment='top',
-                bbox=dict(facecolor=PANEL, edgecolor='#3a3a5c', alpha=0.8))
-        ax.set_title(m['label'], color=FG, fontsize=8, fontweight='bold')
-        ax.set_xlabel('Predicted', color=FG, fontsize=7)
-        ax.set_ylabel('Actual',    color=FG, fontsize=7)
-
-        # Row 1: feature importances
+        ax  = fig.add_subplot(gs[0, col_i])
         ax2 = fig.add_subplot(gs[1, col_i])
-        ax2.set_facecolor(PANEL)
-        ax2.tick_params(colors=FG, labelsize=6)
-        for sp in ax2.spines.values():
-            sp.set_edgecolor('#3a3a5c')
+        for a in (ax, ax2):
+            a.set_facecolor(PANEL)
+            a.tick_params(colors=FG, labelsize=7)
+            for sp in a.spines.values():
+                sp.set_edgecolor('#3a3a5c')
 
-        model_obj = m['model']
-        if hasattr(model_obj, 'feature_importances_'):
-            imp   = model_obj.feature_importances_
-            n     = min(len(imp), len(FEATURE_NAMES))
-            order = np.argsort(imp[:n])
-            ax2.barh(range(n), imp[:n][order], color=colour, alpha=0.75)
-            ax2.set_yticks(range(n))
-            ax2.set_yticklabels(
-                [FEATURE_NAMES[o] for o in order], color=FG, fontsize=5
-            )
-            ax2.set_xlabel('Importance (gain)', color=FG, fontsize=7)
+        if model_key == 'casualty_risk':
+            # ── Row 0: ROC curve (stage 1 classifier) ──────────────────────
+            fpr, tpr, _ = roc_curve(m['y_test_bin'], m['y_prob'])
+            ax.plot(fpr, tpr, color=colour, linewidth=1.5,
+                    label=f"AUC={m['auc']:.3f}")
+            ax.plot([0, 1], [0, 1], color='white', linestyle='--',
+                    linewidth=1, alpha=0.4)
+            ax.set_xlabel('False Positive Rate', color=FG, fontsize=7)
+            ax.set_ylabel('True Positive Rate',  color=FG, fontsize=7)
+            ax.set_title('Casualty Risk — Stage 1 ROC\n'
+                         'P(casualties > 0)  |  Mullahy (1986)',
+                         color=FG, fontsize=7, fontweight='bold')
+            ax.legend(fontsize=7, labelcolor=FG,
+                      facecolor=PANEL, edgecolor='#3a3a5c')
+            ax.text(0.55, 0.12,
+                    f"Train: {m['n_neg']} zeros / {m['n_pos']} positive",
+                    transform=ax.transAxes, color=FG, fontsize=6,
+                    bbox=dict(facecolor=PANEL, edgecolor='#3a3a5c', alpha=0.8))
+
+            # ── Row 1: Stage 2 scatter (non-zero test cases only) ──────────
+            nz = m['nz_test']
+            reg = metrics[model_key].get('regressor')
+            if reg is not None and nz.sum() >= 2:
+                y_nz_true = m['y_test'][nz]
+                y_nz_pred = np.maximum(0, reg.predict(
+                    # reuse scaler-transformed test — stored via combined pred
+                    # approximate: use combined / p_pos where p_pos > 0.1
+                    m['y_pred'][nz] / np.maximum(m['y_prob'][nz], 0.1)
+                ))
+                ax2.scatter(y_nz_pred, y_nz_true, color=colour, s=20, alpha=0.7)
+                lim = max(y_nz_true.max(), y_nz_pred.max()) * 1.1 + 1
+                ax2.plot([0, lim], [0, lim], color='white', linestyle='--',
+                         linewidth=1, alpha=0.5)
+                s2r2  = m.get('stage2_r2',  float('nan'))
+                s2mae = m.get('stage2_mae', float('nan'))
+                ax2.text(0.05, 0.90,
+                         f"R²={s2r2:.3f}\nMAE={s2mae:.2f}\n"
+                         f"n={nz.sum()} non-zero",
+                         transform=ax2.transAxes, color=FG, fontsize=7,
+                         verticalalignment='top',
+                         bbox=dict(facecolor=PANEL, edgecolor='#3a3a5c', alpha=0.8))
+            else:
+                ax2.text(0.5, 0.5,
+                         'Stage 2\nInsufficient\nnon-zero cases',
+                         transform=ax2.transAxes, color=FG,
+                         ha='center', va='center', fontsize=8)
+            ax2.set_title('Stage 2: E[Y | Y > 0]\nPoisson regressor',
+                          color=FG, fontsize=7, fontweight='bold')
+            ax2.set_xlabel('Predicted', color=FG, fontsize=7)
+            ax2.set_ylabel('Actual',    color=FG, fontsize=7)
+
         else:
-            ax2.text(0.5, 0.5, 'Importances\nnot available',
-                     transform=ax2.transAxes, color=FG, ha='center',
-                     fontsize=8)
-        ax2.set_title('Feature Importances', color=FG, fontsize=8,
-                      fontweight='bold')
+            # ── Row 0: scatter predicted vs actual ──────────────────────────
+            ax.scatter(m['y_pred'], m['y_test'], color=colour, s=20, alpha=0.6)
+            lim = max(m['y_test'].max(), m['y_pred'].max()) * 1.1
+            ax.plot([0, lim], [0, lim], color='white', linestyle='--',
+                    linewidth=1, alpha=0.5)
+            ax.text(0.05, 0.90,
+                    f"R²={m['test_r2']:.3f}\nMAE={m['test_mae']:.2f}",
+                    transform=ax.transAxes, color=FG, fontsize=7,
+                    verticalalignment='top',
+                    bbox=dict(facecolor=PANEL, edgecolor='#3a3a5c', alpha=0.8))
+            ax.set_title(m['label'], color=FG, fontsize=8, fontweight='bold')
+            ax.set_xlabel('Predicted', color=FG, fontsize=7)
+            ax.set_ylabel('Actual',    color=FG, fontsize=7)
+
+            # ── Row 1: feature importances ───────────────────────────────────
+            model_obj = m['model']
+            if hasattr(model_obj, 'feature_importances_'):
+                imp   = model_obj.feature_importances_
+                n     = min(len(imp), len(FEATURE_NAMES))
+                order = np.argsort(imp[:n])
+                ax2.barh(range(n), imp[:n][order], color=colour, alpha=0.75)
+                ax2.set_yticks(range(n))
+                ax2.set_yticklabels(
+                    [FEATURE_NAMES[o] for o in order], color=FG, fontsize=5
+                )
+                ax2.set_xlabel('Importance (gain)', color=FG, fontsize=7)
+            else:
+                ax2.text(0.5, 0.5, 'Importances\nnot available',
+                         transform=ax2.transAxes, color=FG, ha='center',
+                         fontsize=8)
+            ax2.set_title('Feature Importances', color=FG, fontsize=8,
+                          fontweight='bold')
 
     fig.savefig(out_path, dpi=150, bbox_inches='tight', facecolor=BG)
     print(f'Training plot saved to: {out_path}')
@@ -721,7 +1047,7 @@ def main():
     print('=' * 70)
     print('Chen & Guestrin (2016)  |  Breiman (2001)  |  Pedregosa et al. (2011)')
     print(f'Runs: {args.runs}  |  Train/test: 80/20  |  Features: {len(FEATURE_NAMES)}')
-    print(f'Locations: {len(TRAINING_LOCATIONS)} historical incidents (Mati + Camp Fire excluded)')
+    print(f'Locations: {len(TRAINING_LOCATIONS)} historical incidents (held-out: Mati, Camp Fire, Pedrogao, Alexandroupoli)')
     print(f'Midpoint extraction: step {MAX_STEPS // 2} / {MAX_STEPS}')
     print(f'Output dir: {output_dir}')
     print('=' * 70 + '\n')
