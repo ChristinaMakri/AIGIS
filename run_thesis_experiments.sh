@@ -158,7 +158,7 @@ run_step "13/17 [Block C] Multi-Incident Diagnostic — 20 runs x 24 incidents (
 # =============================================================================
 
 run_step "14/17 [Block D] Sobol Sensitivity Analysis — N=512 (7168 model runs)" \
-    "python3 run_sensitivity.py --runs 512 --output sensitivity_results.csv"
+    "python3 run_sensitivity.py --N 512 --output sensitivity_results.csv"
 #   N=512 satisfies Saltelli et al. (2010) Section 3.2 recommendation N >= 500/D
 #   for D=6 parameters.  N=128 is exploratory only; N=512 gives publication-quality
 #   95 % CI on total-effect indices STi.

@@ -190,7 +190,7 @@ def run_episode(
             cmd_agent._rl_obs = obs_cmd
 
         # ── Step simulation ─────────────────────────────────────────────
-        done = sim.run_step()
+        done = bool(sim.run_step())
 
         # ── Compute step rewards ────────────────────────────────────────
         cur_burning   = int(np.sum(env.fire_grid == 1))

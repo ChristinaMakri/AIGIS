@@ -189,7 +189,7 @@ SCENARIOS = [
         'params': {
             'WIND_SPEED': 25.0, 'WIND_INITIAL_DIRECTION': 225.0,
             'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 20.0,
-            'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 1.20,
+            'FIRE_SPREAD_PROB_BASE': 0.57, 'ROTHERMEL_BASE_ROS': 1.20,
             'NUM_CIVILIANS': 75,
         },
     },
@@ -201,7 +201,7 @@ SCENARIOS = [
         'params': {
             'WIND_SPEED': 28.0, 'WIND_INITIAL_DIRECTION': 225.0,
             'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
-            'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 1.15,
+            'FIRE_SPREAD_PROB_BASE': 0.58, 'ROTHERMEL_BASE_ROS': 1.15,
             'NUM_CIVILIANS': 90,
         },
     },
