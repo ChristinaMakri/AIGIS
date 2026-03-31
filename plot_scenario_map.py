@@ -5,7 +5,9 @@ Plots all 24 AIGIS scenarios on a world map:
   - 15 training scenarios (blue circles, phases 1-3)
   - 9 held-out validation scenarios (red triangles)
 
-Output: scenario_map.png
+Also produces a Mediterranean inset: scenario_map_mediterranean.png
+
+Output: scenario_map.png, scenario_map_mediterranean.png
 """
 import matplotlib
 matplotlib.use('Agg')
@@ -232,6 +234,93 @@ def _finalise(fig):
 
 
 # ---------------------------------------------------------------------------
+# Mediterranean inset
+# ---------------------------------------------------------------------------
+
+MED_TRAIN_OFFSETS = {
+    'Bages, Spain':      (-1.8,  0.3),
+    'Var, France':       ( 0.3,  0.3),
+    'Penteli, Greece':   ( 0.3, -0.5),
+    'Manavgat, Turkey':  ( 0.3,  0.3),
+    'Rhodes, Greece':    ( 0.3, -0.5),
+    'Kineta, Greece':    (-2.2, -0.5),
+    'Varibobi, Greece':  ( 0.3,  0.3),
+    'Dadia, Greece':     ( 0.3,  0.3),
+    'Evia, Greece':      ( 0.3,  0.3),
+}
+
+MED_HELD_OFFSETS = {
+    'Mati 2018, Greece':              ( 0.3,  0.3),
+    'Pedrogao Grande 2017, Portugal': (-3.5, -0.5),
+    'Alexandroupoli 2023, Greece':    ( 0.3,  0.3),
+    'Peloponnese 2007, Greece':       ( 0.3, -0.5),
+}
+
+# Mediterranean bounding box
+MED_EXTENT = [-12, 38, 34, 48]   # [lon_min, lon_max, lat_min, lat_max]
+
+
+def plot_mediterranean():
+    """Zoomed inset covering the Mediterranean + Turkey region."""
+    fig = plt.figure(figsize=(14, 8))
+    ax = fig.add_subplot(1, 1, 1, projection=ccrs.Mercator())
+    ax.set_extent(MED_EXTENT, crs=ccrs.PlateCarree())
+
+    ax.add_feature(cfeature.LAND,      facecolor='#F5F5F0', edgecolor='none')
+    ax.add_feature(cfeature.OCEAN,     facecolor='#D6EAF8')
+    ax.add_feature(cfeature.COASTLINE, linewidth=0.7, edgecolor='#555')
+    ax.add_feature(cfeature.BORDERS,   linewidth=0.4, edgecolor='#888', linestyle=':')
+    ax.add_feature(cfeature.LAKES,     facecolor='#D6EAF8', edgecolor='none')
+
+    transform = ccrs.PlateCarree()
+
+    # Mediterranean training scenarios
+    med_train = [s for s in TRAINING
+                 if MED_EXTENT[0] <= s['lon'] <= MED_EXTENT[1]
+                 and MED_EXTENT[2] <= s['lat'] <= MED_EXTENT[3]]
+    for s in med_train:
+        c = PHASE_COLORS[s['phase']]
+        ax.plot(s['lon'], s['lat'], 'o', color=c, markersize=11,
+                markeredgecolor='white', markeredgewidth=1.0,
+                transform=transform, zorder=5)
+        dx, dy = MED_TRAIN_OFFSETS.get(s['name'], (0.3, 0.3))
+        ax.annotate(s['name'], xy=(s['lon'], s['lat']),
+                    xytext=(s['lon'] + dx, s['lat'] + dy),
+                    fontsize=8, color='#111', fontweight='bold',
+                    transform=transform, zorder=6,
+                    arrowprops=dict(arrowstyle='-', color='#888', lw=0.5))
+
+    # Mediterranean held-out scenarios
+    med_held = [s for s in HELD_OUT
+                if MED_EXTENT[0] <= s['lon'] <= MED_EXTENT[1]
+                and MED_EXTENT[2] <= s['lat'] <= MED_EXTENT[3]]
+    for s in med_held:
+        ax.plot(s['lon'], s['lat'], '^', color=HELD_COLOR, markersize=12,
+                markeredgecolor='white', markeredgewidth=1.0,
+                transform=transform, zorder=5)
+        dx, dy = MED_HELD_OFFSETS.get(s['name'], (0.3, 0.3))
+        ax.annotate(s['name'], xy=(s['lon'], s['lat']),
+                    xytext=(s['lon'] + dx, s['lat'] + dy),
+                    fontsize=8, color='#111', fontweight='bold',
+                    transform=transform, zorder=6,
+                    arrowprops=dict(arrowstyle='-', color='#888', lw=0.5))
+
+    ax.gridlines(draw_labels=True, linewidth=0.4, color='#CCC',
+                 x_inline=False, y_inline=False)
+    _add_legend(ax)
+
+    fig.suptitle(
+        'Mediterranean Region — AIGIS Scenario Locations',
+        fontsize=13, fontweight='bold', y=0.98
+    )
+    plt.tight_layout()
+    plt.savefig('scenario_map_mediterranean.png', dpi=200, bbox_inches='tight',
+                facecolor='white')
+    plt.close()
+    print("Saved: scenario_map_mediterranean.png")
+
+
+# ---------------------------------------------------------------------------
 # Entry point
 # ---------------------------------------------------------------------------
 
@@ -239,6 +328,7 @@ if __name__ == '__main__':
     if HAS_CARTOPY:
         print("Using cartopy for high-quality map...")
         plot_with_cartopy()
+        plot_mediterranean()
     else:
         print("cartopy not found — using fallback renderer...")
         plot_without_cartopy()
