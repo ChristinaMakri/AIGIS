@@ -196,7 +196,7 @@ python main.py                    # Uses trained models automatically
 ### Train + Evaluate Hybrid MARL
 
 ```bash
-python train_marl.py --episodes 10000   # PPO curriculum training (~2–3 h CPU)
+python train_marl.py --episodes 4000 --steps 500 --phase1-end 800 --phase2-end 2400 --output models/rl   # PPO curriculum training
 python evaluate_marl.py --runs 30       # 95% CI across training + held-out scenarios
 ```
 
@@ -213,10 +213,10 @@ AIGIS/
 ├── evaluate_marl.py               # Evaluate trained MARL agents (95% CI)
 ├── validate_mati.py               # Validate against Mati 2018 fire
 ├── validate_campfire.py           # Validate against Camp Fire 2018
-├── validate_all_incidents.py      # Diagnostic comparison: all 11 incidents
+├── validate_all_incidents.py      # Diagnostic comparison: all 24 incidents (15 training + 9 held-out)
 ├── run_sensitivity.py             # One-at-a-time sensitivity analysis
 ├── run_ablation.py                # Ablation study (CNP, panic, RL flags)
-├── run_thesis_experiments.sh      # Full thesis pipeline (10 steps)
+├── run_thesis_experiments.sh      # Full thesis pipeline (18 steps: 0–17)
 ├── requirements.txt
 ├── README.md
 ├── PHYSICS_MODELS.md              # Scientific model documentation

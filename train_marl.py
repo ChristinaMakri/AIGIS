@@ -434,15 +434,19 @@ def _plot_training_curves(df: pd.DataFrame, out_path: str) -> None:
     8-panel training diagnostic figure (4 rows x 2 cols):
       Row 1: Mortality rate | Evacuation success rate
       Row 2: Firefighter reward | Rescuer reward
-      Row 3: Commander reward | Mean policy entropy (all agents)
-      Row 4: Mean critic loss (all agents) | (blank / reserved)
+      Row 3: Commander reward | Policy entropy per role (FF / Rescuer / Cmd)
+      Row 4: Critic loss per role (FF / Rescuer / Cmd) | (blank / reserved)
 
-    Commander reward was previously missing — added so all three agent
-    learning signals are visible for diagnosis.
-    Entropy and critic loss panels follow the MARL diagnostics standard:
-      Yu et al. (2022). MAPPO. NeurIPS. arXiv:2103.01955.
-      Cooperative MARL Diagnostics (2023). arXiv:2312.08468.
-    Curriculum phase boundaries marked as vertical lines.
+    Per-role entropy and critic loss are shown with separate lines per agent
+    rather than a cross-agent mean.  This allows detection of asymmetric
+    learning dynamics caused by the heterogeneous per-step reward scales
+    (FF +1/cell vs Rescuer +5/rescue): if the Rescuer's entropy collapses
+    significantly earlier than the Firefighter's, the 5x reward asymmetry
+    is causing faster policy convergence and should be investigated.
+
+    Ref: Yu et al. (2022). MAPPO. NeurIPS. arXiv:2103.01955.
+         Kuba et al. (2023). HAPPO/HARL. JMLR 25(1).
+    Curriculum phase boundaries marked as vertical lines (Bengio et al. 2009).
     """
     fig, axes = plt.subplots(4, 2, figsize=(12, 16), facecolor=BG)
     fig.suptitle(
@@ -457,34 +461,41 @@ def _plot_training_curves(df: pd.DataFrame, out_path: str) -> None:
             return x
         return pd.Series(x).rolling(w, min_periods=1).mean().values
 
-    # Compute mean entropy and critic loss across all 3 roles per episode
+    # Ensure per-role columns exist
     for col in ['entropy_ff', 'entropy_rsc', 'entropy_cmd',
                 'loss_critic_ff', 'loss_critic_rsc', 'loss_critic_cmd']:
         if col not in df.columns:
             df[col] = 0.0
-    df['entropy_mean']     = df[['entropy_ff', 'entropy_rsc', 'entropy_cmd']].mean(axis=1)
-    df['critic_loss_mean'] = df[['loss_critic_ff', 'loss_critic_rsc', 'loss_critic_cmd']].mean(axis=1)
 
-    plots = [
-        (axes[0, 0], 'mortality',       'Mortality Rate',               '#ff006e'),
-        (axes[0, 1], 'evacuation',      'Evacuation Success Rate',      '#06d6a0'),
-        (axes[1, 0], 'reward_ff',       'Firefighter Reward',           '#ffd60a'),
-        (axes[1, 1], 'reward_rsc',      'Rescuer Reward',               '#fb5607'),
-        (axes[2, 0], 'reward_cmd',      'Commander Reward',             '#8338ec'),
-        (axes[2, 1], 'entropy_mean',    'Mean Policy Entropy (3 roles)', '#3a86ff'),
-        (axes[3, 0], 'critic_loss_mean','Mean Critic Loss (3 roles)',    '#06d6a0'),
-    ]
-
-    # Hide the unused bottom-right panel
-    axes[3, 1].set_visible(False)
+    # Role colour palette (consistent across entropy and critic loss panels)
+    ROLE_COLOURS = {
+        'ff':  '#ffd60a',   # yellow  — Firefighter
+        'rsc': '#fb5607',   # orange  — Rescuer
+        'cmd': '#8338ec',   # purple  — Commander
+    }
 
     phase_eps = [800, 2400]   # curriculum phase boundaries (Bengio et al. 2009)
 
-    for ax, col, label, colour in plots:
+    def _style_ax(ax):
         ax.set_facecolor(PANEL)
         ax.tick_params(colors=FG, labelsize=7)
         for sp in ax.spines.values():
             sp.set_edgecolor('#3a3a5c')
+        for ph_ep in phase_eps:
+            ax.axvline(ph_ep, color='white', linestyle=':', linewidth=0.8, alpha=0.6)
+        ax.set_xlabel('Episode', color=FG, fontsize=8)
+
+    # --- single-series panels (rows 1-3 left) ---
+    single_plots = [
+        (axes[0, 0], 'mortality',  'Mortality Rate',          '#ff006e'),
+        (axes[0, 1], 'evacuation', 'Evacuation Success Rate', '#06d6a0'),
+        (axes[1, 0], 'reward_ff',  'Firefighter Reward',      ROLE_COLOURS['ff']),
+        (axes[1, 1], 'reward_rsc', 'Rescuer Reward',          ROLE_COLOURS['rsc']),
+        (axes[2, 0], 'reward_cmd', 'Commander Reward',        ROLE_COLOURS['cmd']),
+    ]
+
+    for ax, col, label, colour in single_plots:
+        _style_ax(ax)
         if col not in df.columns:
             ax.set_visible(False)
             continue
@@ -492,12 +503,41 @@ def _plot_training_curves(df: pd.DataFrame, out_path: str) -> None:
         ax.plot(df['episode'], vals, color=colour, alpha=0.25, linewidth=0.5)
         ax.plot(df['episode'], smooth(vals), color=colour, linewidth=1.5,
                 label='100-ep rolling mean')
-        # Mark curriculum phase boundaries
-        for ph_ep in phase_eps:
-            ax.axvline(ph_ep, color='white', linestyle=':', linewidth=0.8, alpha=0.6)
-        ax.set_xlabel('Episode', color=FG, fontsize=8)
         ax.set_ylabel(label, color=FG, fontsize=8)
         ax.legend(fontsize=6, facecolor=PANEL, labelcolor=FG)
+
+    # --- per-role entropy panel (row 3 right) ---
+    ax_ent = axes[2, 1]
+    _style_ax(ax_ent)
+    ax_ent.set_ylabel('Policy Entropy (per role)', color=FG, fontsize=8)
+    for role, col in [('Firefighter', 'entropy_ff'),
+                      ('Rescuer',     'entropy_rsc'),
+                      ('Commander',   'entropy_cmd')]:
+        key = col.split('_')[1]
+        colour = ROLE_COLOURS[key]
+        vals = df[col].values
+        ax_ent.plot(df['episode'], vals, color=colour, alpha=0.20, linewidth=0.5)
+        ax_ent.plot(df['episode'], smooth(vals), color=colour, linewidth=1.5,
+                    label=role)
+    ax_ent.legend(fontsize=6, facecolor=PANEL, labelcolor=FG)
+
+    # --- per-role critic loss panel (row 4 left) ---
+    ax_cl = axes[3, 0]
+    _style_ax(ax_cl)
+    ax_cl.set_ylabel('Critic Loss (per role)', color=FG, fontsize=8)
+    for role, col in [('Firefighter', 'loss_critic_ff'),
+                      ('Rescuer',     'loss_critic_rsc'),
+                      ('Commander',   'loss_critic_cmd')]:
+        key = col.split('_')[2]
+        colour = ROLE_COLOURS[key]
+        vals = df[col].values
+        ax_cl.plot(df['episode'], vals, color=colour, alpha=0.20, linewidth=0.5)
+        ax_cl.plot(df['episode'], smooth(vals), color=colour, linewidth=1.5,
+                   label=role)
+    ax_cl.legend(fontsize=6, facecolor=PANEL, labelcolor=FG)
+
+    # Hide unused bottom-right panel
+    axes[3, 1].set_visible(False)
 
     fig.tight_layout()
     fig.savefig(out_path, dpi=130, bbox_inches='tight', facecolor=BG)
