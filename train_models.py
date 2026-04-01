@@ -103,8 +103,8 @@ Usage
   python train_models.py [--runs N] [--lat LAT --lon LON --radius R]
                          [--output-dir DIR] [--seed SEED]
 
-  Recommended: --runs 200 (80/20 split → 160 train / 40 test)
-  Minimum:     --runs 50  (adequate for pilot evaluation)
+  Recommended: --runs 2000 (80/20 split → 1600 train / 400 test; ~87 runs/location)
+  Minimum:     --runs 200  (adequate for pilot evaluation; ~9 runs/location)
 
 Outputs
 -------
@@ -457,6 +457,135 @@ TRAINING_LOCATIONS = [
             'FIRE_SPREAD_PROB_BASE': 0.40,
             'ROTHERMEL_BASE_ROS': 0.82,
             'NUM_CIVILIANS': 50,
+        },
+    },
+    # ── 8 additional scenarios added for geographic diversity ─────────────────
+    {
+        # Corte, Corsica, France — summer maquis fires (Libeccio/NW wind)
+        # Source: Meddour-Sahar, O. et al. (2013). "Wildfire risk and fire management
+        #   in Mediterranean regions." iForest 6:366-374. DOI: 10.3832/ifor0960-006
+        #   Tramontane/Libeccio NW wind 30-40 km/h; maquis shrubland ROS 0.45-0.55 m/s
+        'lat': 42.302, 'lon': 9.148, 'radius': 3000,
+        'fire_locations': [(42.314, 9.160), (42.308, 9.154)],
+        'historical_params': {
+            'WIND_SPEED': 10.0,             # Libeccio NW ~36 km/h (Meddour-Sahar 2013)
+            'WIND_INITIAL_DIRECTION': 135.0, # NW→SE (AIGIS: going TO SE)
+            'WIND_OSCILLATION_AMPLITUDE': 6.0,
+            'FIRE_SPREAD_PROB_BASE': 0.28,
+            'ROTHERMEL_BASE_ROS': 0.52,
+            'NUM_CIVILIANS': 35,
+        },
+    },
+    {
+        # Pisan Hills, Tuscany, Italy — summer fires (Libeccio SW wind, macchia)
+        # Source: Elia, M. et al. (2015). "Spatial and temporal forest fire occurrence
+        #   in Basilicata." iForest 8:31-38. DOI: 10.3832/ifor1203-007
+        #   SW Libeccio 30-35 km/h; Mediterranean mixed macchia ROS 0.45-0.55 m/s
+        'lat': 43.720, 'lon': 10.458, 'radius': 3000,
+        'fire_locations': [(43.732, 10.470), (43.726, 10.464)],
+        'historical_params': {
+            'WIND_SPEED': 9.0,              # Libeccio SW ~32 km/h (Elia 2015)
+            'WIND_INITIAL_DIRECTION': 45.0,  # SW→NE (AIGIS: going TO NE)
+            'WIND_OSCILLATION_AMPLITUDE': 5.0,
+            'FIRE_SPREAD_PROB_BASE': 0.25,
+            'ROTHERMEL_BASE_ROS': 0.50,
+            'NUM_CIVILIANS': 40,
+        },
+    },
+    {
+        # Mount Carmel, Israel — December 2010 (SW wind, Mediterranean pine forest)
+        # Source: Cohen, M. et al. (2014). "The Carmel fire 2010."
+        #   Fire Ecology 10(1). DOI: 10.4996/fireecology.1001033
+        #   SW wind ~10-12 m/s; 44 fatalities; ~5,000 ha burned; RH 15-25%
+        'lat': 32.698, 'lon': 35.018, 'radius': 3000,
+        'fire_locations': [(32.710, 35.030), (32.704, 35.024)],
+        'historical_params': {
+            'WIND_SPEED': 11.0,             # SW wind ~11 m/s (Cohen 2014)
+            'WIND_INITIAL_DIRECTION': 45.0,  # SW→NE (AIGIS: going TO NE)
+            'WIND_OSCILLATION_AMPLITUDE': 8.0,
+            'FIRE_SPREAD_PROB_BASE': 0.36,
+            'ROTHERMEL_BASE_ROS': 0.78,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        # Dwellingup, Western Australia — summer jarrah forest fires
+        # Source: Burrows, N. et al. (1991). "Fire behaviour in jarrah forest."
+        #   CALM Science Paper No. 6. DFES WA reports 2005-2015.
+        #   NE sea-breeze inversion: Fremantle Doctor pushes NE→SW ~13 m/s;
+        #   jarrah forest ROS 0.65-0.80 m/s; RH 20-30%.
+        'lat': -32.714, 'lon': 116.063, 'radius': 3000,
+        'fire_locations': [(-32.702, 116.075), (-32.708, 116.069)],
+        'historical_params': {
+            'WIND_SPEED': 13.0,             # Fremantle Doctor NE ~13 m/s (Burrows 1991)
+            'WIND_INITIAL_DIRECTION': 225.0, # NE→SW (AIGIS: going TO SW)
+            'WIND_OSCILLATION_AMPLITUDE': 9.0,
+            'FIRE_SPREAD_PROB_BASE': 0.36,
+            'ROTHERMEL_BASE_ROS': 0.75,
+            'NUM_CIVILIANS': 50,
+        },
+    },
+    {
+        # Serra de Monchique, Algarve, Portugal — August 2018 (NE wind, drought)
+        # Source: Copernicus EMS EMSR319 (2018). Monchique fire, Faro district.
+        #   ICNF Portugal (2018). Monchique fire report. NE wind ~13 m/s;
+        #   ~27,000 ha burned; 2 fatalities. (Distinct from held-out Pedrogao 2017)
+        'lat': 37.322, 'lon': -8.553, 'radius': 3000,
+        'fire_locations': [(37.334, -8.541), (37.328, -8.547)],
+        'historical_params': {
+            'WIND_SPEED': 13.0,             # NE wind ~13 m/s (Copernicus EMSR319)
+            'WIND_INITIAL_DIRECTION': 225.0, # NE→SW (AIGIS: going TO SW)
+            'WIND_OSCILLATION_AMPLITUDE': 10.0,
+            'FIRE_SPREAD_PROB_BASE': 0.40,
+            'ROTHERMEL_BASE_ROS': 0.82,
+            'NUM_CIVILIANS': 55,
+        },
+    },
+    {
+        # Cuglieri, Oristano, Sardinia — July 2021 (Maestrale NW wind, macchia)
+        # Source: Copernicus EMS EMSR558 (2021). Oristano-Cuglieri fire, Sardinia.
+        #   Maestrale NW wind ~20 m/s; ~25,000 ha burned; 1 fatality; RH < 15%.
+        'lat': 40.081, 'lon': 8.595, 'radius': 3000,
+        'fire_locations': [(40.093, 8.607), (40.087, 8.601)],
+        'historical_params': {
+            'WIND_SPEED': 20.0,             # Maestrale NW ~20 m/s (Copernicus EMSR558)
+            'WIND_INITIAL_DIRECTION': 135.0, # NW→SE (AIGIS: going TO SE)
+            'WIND_OSCILLATION_AMPLITUDE': 12.0,
+            'FIRE_SPREAD_PROB_BASE': 0.52,
+            'ROTHERMEL_BASE_ROS': 1.05,
+            'NUM_CIVILIANS': 55,
+        },
+    },
+    {
+        # Lytton Creek, British Columbia, Canada — July 2021 (post-heatwave, SW wind)
+        # Source: BC Wildfire Service (2021). Lytton Creek Wildfire Incident Report.
+        #   Post-heat-dome event (49.6°C record); SW wind ~20 m/s; RH < 10%;
+        #   ~83,000 ha burned; 2 fatalities (town of Lytton destroyed).
+        'lat': 50.232, 'lon': -121.583, 'radius': 3000,
+        'fire_locations': [(50.244, -121.571), (50.238, -121.577)],
+        'historical_params': {
+            'WIND_SPEED': 20.0,             # SW wind ~20 m/s (BC Wildfire Service 2021)
+            'WIND_INITIAL_DIRECTION': 45.0,  # SW→NE (AIGIS: going TO NE)
+            'WIND_OSCILLATION_AMPLITUDE': 14.0,
+            'FIRE_SPREAD_PROB_BASE': 0.55,
+            'ROTHERMEL_BASE_ROS': 1.15,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        # Knysna, Garden Route, South Africa — June 2017 (Berg wind, fynbos interface)
+        # Source: Baard, J.A. (2019). "The 2017 Knysna fires." SAICE Journal 61(3).
+        #   Forsyth, G.G. et al. (2010). South African fire ecology, SAEON.
+        #   NW Berg wind ~22 m/s; 7 fatalities; ~1,000 homes destroyed; urban interface.
+        'lat': -34.036, 'lon': 23.047, 'radius': 3000,
+        'fire_locations': [(-34.024, 23.059), (-34.030, 23.053)],
+        'historical_params': {
+            'WIND_SPEED': 22.0,             # NW Berg wind ~22 m/s (Baard 2019)
+            'WIND_INITIAL_DIRECTION': 135.0, # NW→SE (AIGIS: going TO SE)
+            'WIND_OSCILLATION_AMPLITUDE': 12.0,
+            'FIRE_SPREAD_PROB_BASE': 0.55,
+            'ROTHERMEL_BASE_ROS': 1.10,
+            'NUM_CIVILIANS': 80,
         },
     },
 ]

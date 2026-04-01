@@ -8,13 +8,16 @@
 #
 # SCENARIO INVENTORY
 # ------------------
-# Training (15 scenarios — MARL curriculum, never used for validation):
-#   Phase 1 (easy)   : Bages (Spain), Var (France), Penteli (Greece)
-#   Phase 2 (medium) : Manavgat (Turkey), Rhodes (Greece),
-#                      Kineta (Greece), Varibobi (Greece), Dadia/Evros (Greece)
-#   Phase 3 (hard)   : Fort McMurray (Canada), Gospers Mountain (Australia),
-#                      Carr Fire (USA), Glass Fire (USA), Woolsey Fire (USA),
-#                      Thomas Fire (USA), Evia Fire (Greece)
+# Training (23 scenarios — MARL curriculum, never used for validation):
+#   Phase 1 (easy,    5): Bages (Spain), Var (France), Penteli (Greece),
+#                         Corsica (France), Tuscany (Italy)
+#   Phase 2 (medium,  8): Manavgat (Turkey), Rhodes (Greece),
+#                         Kineta (Greece), Varibobi (Greece), Dadia/Evros (Greece),
+#                         Carmel (Israel), Dwellingup (W. Australia), Monchique (Portugal)
+#   Phase 3 (hard,   10): Fort McMurray (Canada), Gospers Mountain (Australia),
+#                         Carr Fire (USA), Glass Fire (USA), Woolsey Fire (USA),
+#                         Thomas Fire (USA), Evia (Greece), Oristano/Sardinia (Italy),
+#                         Lytton Creek (Canada), Knysna (South Africa)
 #
 # Validation / held-out (9 scenarios — real incidents, never seen in training):
 #   Mati 2018 (Greece)              — Lagouvardos et al. 2019 / EMSR249
@@ -57,17 +60,17 @@ run_step() {
 # BLOCK A — ML MODEL TRAINING AND EVALUATION
 # Two-stage hurdle model (Mullahy 1986; Cameron & Trivedi 2013) for casualty
 # risk; RandomForest for evacuation count and containment time.
-# Trained on 200 Monte Carlo runs across 12 historical locations (80/20 split).
+# Trained on 2000 Monte Carlo runs across 23 historical locations (80/20 split).
 # Evaluated with 50-run hold-out split.
 # =============================================================================
 
-run_step "0/17 [Pre-run] Dataset Diversity Chart — 24 scenarios (15 training + 9 held-out)" \
+run_step "0/17 [Pre-run] Dataset Diversity Chart — 32 scenarios (23 training + 9 held-out)" \
     "python3 plot_dataset_diversity.py --output dataset_diversity.png"
 
-run_step "1/17 [Block A] Train ML Models — 200 Monte Carlo runs, 15 locations" \
-    "python3 train_models.py --runs 200"
+run_step "1/17 [Block A] Train ML Models — 2000 Monte Carlo runs, 23 locations" \
+    "python3 train_models.py --runs 2000"
 
-run_step "2/17 [Block A] Evaluate ML Models — 10 runs x 15 training scenarios (in-distribution)" \
+run_step "2/17 [Block A] Evaluate ML Models — 10 runs x 23 training scenarios (in-distribution)" \
     "python3 evaluate_ml_models.py --runs 10 --multi-scenario --output ml_evaluation_results.csv"
 
 # =============================================================================
@@ -135,16 +138,16 @@ run_step "11/17 [Block B] Validate Valparaiso 2014 — 50 runs [held-out]" \
 
 # =============================================================================
 # BLOCK C — BASELINE MONTE CARLO AND MULTI-INCIDENT COVERAGE
-# Establishes baseline performance distribution across all 15 training
+# Establishes baseline performance distribution across all 23 training
 # scenarios and provides inter-scenario comparison data.
 # =============================================================================
 
 run_step "12/17 [Block C] Baseline Monte Carlo — 50 runs, default scenario" \
     "python3 main.py --batch 50 --output baseline.csv"
 
-run_step "13/17 [Block C] Multi-Incident Diagnostic — 20 runs x 24 incidents (15 training + 9 held-out)" \
+run_step "13/17 [Block C] Multi-Incident Diagnostic — 20 runs x 32 incidents (23 training + 9 held-out)" \
     "python3 validate_all_incidents.py --runs 20 --output all_incidents_validation.csv"
-#   Runs all 24 scenarios at 20 runs each = 480 total runs.
+#   Runs all 32 scenarios at 20 runs each = 640 total runs.
 #   Outputs per-scenario mean +/- 95 % CI for mortality, evacuation, burned area.
 
 # =============================================================================
@@ -169,12 +172,12 @@ run_step "15/17 [Block D] Ablation Study — 50 runs per condition (4 conditions
 # =============================================================================
 # BLOCK E — MARL TRAINING AND FULL EVALUATION
 # Train: 4,000 episodes x 500 steps over 15 curriculum scenarios (Bengio et al. 2009).
-# Evaluate: 50 runs x 24 scenarios (15 training + 9 held-out) = 1200 total.
+# Evaluate: 50 runs x 32 scenarios (23 training + 9 held-out) = 1600 total.
 #   Training split  -> in-distribution generalisation check (phases 1-3)
 #   Held-out split  -> OOD generalisation to real documented incidents
 # =============================================================================
 
-run_step "16/17 [Block E] Train MARL — 4,000 episodes x 500 steps, 15-scenario curriculum" \
+run_step "16/17 [Block E] Train MARL — 4,000 episodes x 500 steps, 23-scenario curriculum" \
     "python3 train_marl.py --episodes 4000 --steps 500 --phase1-end 800 --phase2-end 2400 --output models/rl"
 #   4000 episodes x 500 steps = 2,000,000 total environment steps — same as the
 #   original 10,000 x 200 budget, but episode length now matches evaluation (500 steps).
@@ -184,7 +187,7 @@ run_step "16/17 [Block E] Train MARL — 4,000 episodes x 500 steps, 15-scenario
 #     Phase 3 hard   : 2400 – 4000 episodes (40%)
 #   Bengio et al. (2009); PPO clip eps=0.2, GAE lambda=0.95 (Schulman et al. 2016)
 
-run_step "17/17 [Block E] Evaluate MARL — 50 runs x 24 scenarios (15 train + 9 held-out)" \
+run_step "17/17 [Block E] Evaluate MARL — 50 runs x 32 scenarios (23 train + 9 held-out)" \
     "python3 evaluate_marl.py --runs 50 --output marl_evaluation_results.csv"
 #   Held-out: Mati, Camp Fire, Pedrogao, Alexandroupoli, Lahaina, Black Saturday,
 #             Tubbs Fire 2017, Peloponnese 2007, Valparaiso 2014

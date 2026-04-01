@@ -213,7 +213,7 @@ AIGIS/
 ├── evaluate_marl.py               # Evaluate trained MARL agents (95% CI)
 ├── validate_mati.py               # Validate against Mati 2018 fire
 ├── validate_campfire.py           # Validate against Camp Fire 2018
-├── validate_all_incidents.py      # Diagnostic comparison: all 24 incidents (15 training + 9 held-out)
+├── validate_all_incidents.py      # Diagnostic comparison: all 32 incidents (23 training + 9 held-out)
 ├── run_sensitivity.py             # One-at-a-time sensitivity analysis
 ├── run_ablation.py                # Ablation study (CNP, panic, RL flags)
 ├── run_thesis_experiments.sh      # Full thesis pipeline (18 steps: 0–17)

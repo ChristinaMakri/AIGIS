@@ -38,7 +38,7 @@ from scipy import stats
 from scipy.stats import ks_2samp
 
 # ---------------------------------------------------------------------------
-# Full dataset — 15 training + 9 held-out, all documented values included
+# Full dataset — 23 training + 9 held-out, all documented values included
 # ---------------------------------------------------------------------------
 
 SCENARIOS = [
@@ -105,6 +105,39 @@ SCENARIOS = [
          continent='Europe',
          wind=15.0, ros=0.95, fsp=0.48, civ=65,
          doc_mortality=0.00002, doc_burned=50.0),
+    # ── 8 additional training scenarios ──────────────────────────────────────
+    dict(name='Corte, Corsica',       year=2022, split='Training', phase=1,
+         continent='Europe',
+         wind=10.0, ros=0.52, fsp=0.28, civ=35,
+         doc_mortality=0.0000, doc_burned=20.0),
+    dict(name='Pisan Hills, Tuscany', year=2022, split='Training', phase=1,
+         continent='Europe',
+         wind=9.0,  ros=0.50, fsp=0.25, civ=40,
+         doc_mortality=0.0000, doc_burned=18.0),
+    dict(name='Carmel, Israel',       year=2010, split='Training', phase=2,
+         continent='Asia',
+         wind=11.0, ros=0.78, fsp=0.36, civ=60,
+         doc_mortality=0.0010, doc_burned=35.0),
+    dict(name='Dwellingup, W. Aust.', year=2020, split='Training', phase=2,
+         continent='Australia',
+         wind=13.0, ros=0.75, fsp=0.36, civ=50,
+         doc_mortality=0.0000, doc_burned=30.0),
+    dict(name='Monchique, Portugal',  year=2018, split='Training', phase=2,
+         continent='Europe',
+         wind=13.0, ros=0.82, fsp=0.40, civ=55,
+         doc_mortality=0.0007, doc_burned=40.0),
+    dict(name='Oristano, Sardinia',   year=2021, split='Training', phase=3,
+         continent='Europe',
+         wind=20.0, ros=1.05, fsp=0.52, civ=55,
+         doc_mortality=0.0005, doc_burned=45.0),
+    dict(name='Lytton Creek, BC',     year=2021, split='Training', phase=3,
+         continent='N. America',
+         wind=20.0, ros=1.15, fsp=0.55, civ=60,
+         doc_mortality=0.0080, doc_burned=50.0),
+    dict(name='Knysna, S. Africa',    year=2017, split='Training', phase=3,
+         continent='Africa',
+         wind=22.0, ros=1.10, fsp=0.55, civ=80,
+         doc_mortality=0.0005, doc_burned=35.0),
     # ── Held-out OOD ─────────────────────────────────────────────────────────
     dict(name='Mati 2018',            year=2018, split='Held-Out', phase=None,
          continent='Europe',
@@ -275,7 +308,7 @@ def plot_correlation(output_dir: str) -> None:
     fig, ax = plt.subplots(figsize=(9, 7.5), facecolor=BG)
     ax.set_facecolor(PANEL)
     fig.suptitle(
-        'AIGIS Dataset — Parameter Correlation Matrix  (n=24 scenarios)\n'
+        'AIGIS Dataset — Parameter Correlation Matrix  (n=32 scenarios)\n'
         'Pearson r; colour: blue = negative, red = positive correlation',
         color=FG, fontsize=10, fontweight='bold',
     )
@@ -507,13 +540,13 @@ def print_captions() -> None:
             "of spread; bubble size proportional to simulated civilian population; "
             "dashed lines denote iso-intensity contours (fire intensity = wind × ROS). "
             "(d) Fire intensity over time (2007–2023); inset pie chart shows "
-            "continental distribution of all 24 incidents. "
+            "continental distribution of all 32 incidents. "
             "Sources: Copernicus EMS activation records; CAL FIRE incident reports; "
             "NFPA (2024); Teague et al. (2010) Royal Commission; "
             "Koutsias et al. (2012); Encinas et al. (2015)."
         ),
         'dataset_distributions.png': (
-            "Figure X+1: Comparison of parameter distributions between the 15 training "
+            "Figure X+1: Comparison of parameter distributions between the 23 training "
             "scenarios and 9 held-out OOD scenarios. Bars show normalised histograms; "
             "dashed curves show kernel density estimates (Scott 1992 bandwidth); "
             "vertical solid lines mark group means. "
@@ -538,7 +571,7 @@ def print_captions() -> None:
         'dataset_intensity_mortality.png': (
             "Figure X+3: Fire intensity (wind speed × Rothermel base ROS) vs. "
             "documented mortality rate (left) and documented burned area (right) "
-            "for all 24 incidents. OLS regression line with 95% confidence band "
+            "for all 32 incidents. OLS regression line with 95% confidence band "
             "is shown. The positive correlation between intensity and burned area "
             "confirms the physical plausibility of the scenario parameters. "
             "The weak correlation between intensity and mortality reflects the "

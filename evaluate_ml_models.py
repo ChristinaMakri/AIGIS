@@ -417,15 +417,15 @@ def run_multi_scenario_evaluation(
     output_file: str = 'ml_evaluation_results.csv',
 ) -> pd.DataFrame:
     """
-    Evaluate across all 15 training scenarios to measure in-distribution
-    performance.  num_runs simulations are run per scenario (total = num_runs × 15).
+    Evaluate across all 23 training scenarios to measure in-distribution
+    performance.  num_runs simulations are run per scenario (total = num_runs × 23).
 
     This is the correct evaluation for assessing whether the models have learned
     from the training distribution.  A separate held-out evaluation (single OOD
     scenario) tests generalisation.
     """
     print('=' * 70)
-    print('AIGIS — ML Model Evaluation  (in-distribution, 15 training scenarios)')
+    print('AIGIS — ML Model Evaluation  (in-distribution, 23 training scenarios)')
     print('=' * 70)
     print('Willmott & Matsuura (2005)  |  Chen & Guestrin (2016) XGBoost')
     print(f'Scenarios: {len(TRAINING_LOCATIONS)}  |  Runs per scenario: {num_runs}'
@@ -514,7 +514,7 @@ def main():
     parser.add_argument('--lon',    type=float, default=23.920)
     parser.add_argument('--radius', type=int,   default=3000)
     parser.add_argument('--multi-scenario', action='store_true',
-                        help='Evaluate across all 15 training scenarios '
+                        help='Evaluate across all 23 training scenarios '
                              '(in-distribution); --runs is per scenario')
     args = parser.parse_args()
 

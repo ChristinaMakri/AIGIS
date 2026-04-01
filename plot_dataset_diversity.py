@@ -2,7 +2,7 @@
 AIGIS Dataset Diversity Chart
 ==============================
 Generates a single publication-quality figure showing the geographic,
-temporal, and parametric diversity of the 15 training and 9 held-out
+temporal, and parametric diversity of the 23 training and 9 held-out
 (OOD) scenarios used in the AIGIS thesis experiments.
 
 Panels
@@ -31,7 +31,7 @@ import matplotlib.patches as mpatches
 from matplotlib.lines import Line2D
 
 # ---------------------------------------------------------------------------
-# Dataset definition — all 24 scenarios
+# Dataset definition — all 32 scenarios (23 training + 9 held-out)
 # ---------------------------------------------------------------------------
 
 TRAINING = [
@@ -68,6 +68,23 @@ TRAINING = [
          lat=34.354,  lon=-119.065, wind=22.0, ros=1.12, civ=70),
     dict(name='Evia Fire, Greece',     year=2021, phase=3, continent='Europe',
          lat=38.953,  lon=23.150,   wind=15.0, ros=0.95, civ=65),
+    # 8 additional scenarios for geographic diversity
+    dict(name='Corte, Corsica',        year=2022, phase=1, continent='Europe',
+         lat=42.302,  lon=9.148,    wind=10.0, ros=0.52, civ=35),
+    dict(name='Pisan Hills, Tuscany',  year=2022, phase=1, continent='Europe',
+         lat=43.720,  lon=10.458,   wind=9.0,  ros=0.50, civ=40),
+    dict(name='Carmel, Israel',        year=2010, phase=2, continent='Asia',
+         lat=32.698,  lon=35.018,   wind=11.0, ros=0.78, civ=60),
+    dict(name='Dwellingup, W. Aust.',  year=2020, phase=2, continent='Australia',
+         lat=-32.714, lon=116.063,  wind=13.0, ros=0.75, civ=50),
+    dict(name='Monchique, Portugal',   year=2018, phase=2, continent='Europe',
+         lat=37.322,  lon=-8.553,   wind=13.0, ros=0.82, civ=55),
+    dict(name='Oristano, Sardinia',    year=2021, phase=3, continent='Europe',
+         lat=40.081,  lon=8.595,    wind=20.0, ros=1.05, civ=55),
+    dict(name='Lytton Creek, BC',      year=2021, phase=3, continent='N. America',
+         lat=50.232,  lon=-121.583, wind=20.0, ros=1.15, civ=60),
+    dict(name='Knysna, S. Africa',     year=2017, phase=3, continent='Africa',
+         lat=-34.036, lon=23.047,   wind=22.0, ros=1.10, civ=80),
 ]
 
 HELD_OUT = [
@@ -110,6 +127,7 @@ CONTINENT_COLOURS = {
     'Australia': '#06d6a0',
     'Asia':      '#e63946',
     'S. America':'#ffd166',
+    'Africa':    '#c77dff',
 }
 
 # ---------------------------------------------------------------------------

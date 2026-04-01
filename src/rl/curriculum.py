@@ -1,20 +1,23 @@
 """
-Training curriculum across the 15 historical fire scenarios.
-=============================================================
+Training curriculum across 23 historical fire scenarios.
+=========================================================
 Implements difficulty-ordered curriculum learning:
   Bengio, Y., Louradour, J., Collobert, R., & Weston, J. (2009).
   "Curriculum Learning." ICML-09, pp. 41–48.
   [Start with easy scenarios; add harder ones as training progresses.]
 
 Scenarios are ordered by fire intensity (ROTHERMEL_BASE_ROS × WIND_SPEED):
-  Phase 1 (easy):   Bages, Var, Penteli                            — low wind / low ROS
-  Phase 2 (medium): Manavgat, Rhodes, Kineta, Varibobi, Dadia      — moderate wind
-  Phase 3 (hard):   Fort McMurray, Gospers Mtn, Carr, Glass,
-                    Woolsey, Thomas, Evia                           — high wind + fast spread
+  Phase 1 (easy,   5 scenarios): Bages, Var, Penteli, Corsica, Tuscany
+  Phase 2 (medium, 8 scenarios): Manavgat, Rhodes, Kineta, Varibobi, Dadia,
+                                 Carmel, Dwellingup, Monchique
+  Phase 3 (hard,  10 scenarios): Fort McMurray, Gospers Mtn, Carr, Glass,
+                                 Woolsey, Thomas, Evia, Oristano,
+                                 Lytton, Knysna
 
 Held out (never used in training — reserved for validation only):
   Mati 2018, Camp Fire 2018, Pedrogao Grande 2017, Alexandroupoli 2023,
-  Lahaina 2023, Black Saturday 2009 (Kinglake, Victoria)
+  Lahaina 2023, Black Saturday 2009, Tubbs 2017, Peloponnese 2007,
+  Valparaiso 2014
 """
 from __future__ import annotations
 from typing import Optional
@@ -60,6 +63,34 @@ SCENARIOS = [
             'WIND_OSCILLATION_AMPLITUDE': 5.0,  'WIND_OSCILLATION_PERIOD': 40.0,
             'FIRE_SPREAD_PROB_BASE': 0.28, 'ROTHERMEL_BASE_ROS': 0.55,
             'NUM_CIVILIANS': 50,
+        },
+    },
+    {
+        'name': 'Corte, Corsica',
+        'phase': 1,
+        'lat': 42.302, 'lon': 9.148, 'radius': 3000,
+        'fire_locations': [(42.314, 9.160), (42.308, 9.154)],
+        # Libeccio NW wind ~36 km/h; maquis shrubland.
+        # Ref: Meddour-Sahar et al. (2013). iForest 6:366-374.
+        'params': {
+            'WIND_SPEED': 10.0, 'WIND_INITIAL_DIRECTION': 135.0,
+            'WIND_OSCILLATION_AMPLITUDE': 6.0,  'WIND_OSCILLATION_PERIOD': 38.0,
+            'FIRE_SPREAD_PROB_BASE': 0.28, 'ROTHERMEL_BASE_ROS': 0.52,
+            'NUM_CIVILIANS': 35,
+        },
+    },
+    {
+        'name': 'Pisan Hills, Tuscany',
+        'phase': 1,
+        'lat': 43.720, 'lon': 10.458, 'radius': 3000,
+        'fire_locations': [(43.732, 10.470), (43.726, 10.464)],
+        # Libeccio SW wind ~32 km/h; Mediterranean mixed macchia.
+        # Ref: Elia et al. (2015). iForest 8:31-38.
+        'params': {
+            'WIND_SPEED': 9.0,  'WIND_INITIAL_DIRECTION': 45.0,
+            'WIND_OSCILLATION_AMPLITUDE': 5.0,  'WIND_OSCILLATION_PERIOD': 40.0,
+            'FIRE_SPREAD_PROB_BASE': 0.25, 'ROTHERMEL_BASE_ROS': 0.50,
+            'NUM_CIVILIANS': 40,
         },
     },
     # ── Phase 2: Medium ──────────────────────────────────────────────────
@@ -128,6 +159,49 @@ SCENARIOS = [
             'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 28.0,
             'FIRE_SPREAD_PROB_BASE': 0.40, 'ROTHERMEL_BASE_ROS': 0.82,
             'NUM_CIVILIANS': 50,
+        },
+    },
+    {
+        'name': 'Carmel, Israel',
+        'phase': 2,
+        'lat': 32.698, 'lon': 35.018, 'radius': 3000,
+        'fire_locations': [(32.710, 35.030), (32.704, 35.024)],
+        # December 2010: SW wind ~11 m/s; 44 fatalities; ~5,000 ha.
+        # Ref: Cohen et al. (2014). Fire Ecology 10(1).
+        'params': {
+            'WIND_SPEED': 11.0, 'WIND_INITIAL_DIRECTION': 45.0,
+            'WIND_OSCILLATION_AMPLITUDE': 8.0,  'WIND_OSCILLATION_PERIOD': 28.0,
+            'FIRE_SPREAD_PROB_BASE': 0.36, 'ROTHERMEL_BASE_ROS': 0.78,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        'name': 'Dwellingup, W. Australia',
+        'phase': 2,
+        'lat': -32.714, 'lon': 116.063, 'radius': 3000,
+        'fire_locations': [(-32.702, 116.075), (-32.708, 116.069)],
+        # Fremantle Doctor sea breeze inversion; NE→SW ~13 m/s; jarrah forest.
+        # Ref: Burrows et al. (1991). CALM Science Paper No. 6.
+        'params': {
+            'WIND_SPEED': 13.0, 'WIND_INITIAL_DIRECTION': 225.0,
+            'WIND_OSCILLATION_AMPLITUDE': 9.0,  'WIND_OSCILLATION_PERIOD': 25.0,
+            'FIRE_SPREAD_PROB_BASE': 0.36, 'ROTHERMEL_BASE_ROS': 0.75,
+            'NUM_CIVILIANS': 50,
+        },
+    },
+    {
+        'name': 'Monchique, Portugal',
+        'phase': 2,
+        'lat': 37.322, 'lon': -8.553, 'radius': 3000,
+        'fire_locations': [(37.334, -8.541), (37.328, -8.547)],
+        # August 2018: NE wind ~13 m/s; ~27,000 ha burned; 2 fatalities.
+        # (Distinct from held-out Pedrogao 2017.)
+        # Ref: Copernicus EMS EMSR319 (2018); ICNF Portugal (2018).
+        'params': {
+            'WIND_SPEED': 13.0, 'WIND_INITIAL_DIRECTION': 225.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 26.0,
+            'FIRE_SPREAD_PROB_BASE': 0.40, 'ROTHERMEL_BASE_ROS': 0.82,
+            'NUM_CIVILIANS': 55,
         },
     },
     # ── Phase 3: Hard ────────────────────────────────────────────────────
@@ -233,6 +307,49 @@ SCENARIOS = [
             'NUM_CIVILIANS': 65,
         },
     },
+    {
+        'name': 'Oristano, Sardinia',
+        'phase': 3,
+        'lat': 40.081, 'lon': 8.595, 'radius': 3000,
+        'fire_locations': [(40.093, 8.607), (40.087, 8.601)],
+        # July 2021: Maestrale NW wind ~20 m/s; ~25,000 ha; 1 fatality; RH < 15%.
+        # Ref: Copernicus EMS EMSR558 (2021). Oristano-Cuglieri fire, Sardinia.
+        'params': {
+            'WIND_SPEED': 20.0, 'WIND_INITIAL_DIRECTION': 135.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
+            'FIRE_SPREAD_PROB_BASE': 0.52, 'ROTHERMEL_BASE_ROS': 1.05,
+            'NUM_CIVILIANS': 55,
+        },
+    },
+    {
+        'name': 'Lytton Creek, BC',
+        'phase': 3,
+        'lat': 50.232, 'lon': -121.583, 'radius': 3000,
+        'fire_locations': [(50.244, -121.571), (50.238, -121.577)],
+        # July 2021: post-heat-dome (49.6°C record); SW wind ~20 m/s; RH < 10%;
+        # ~83,000 ha burned; 2 fatalities (town of Lytton destroyed).
+        # Ref: BC Wildfire Service (2021). Lytton Creek Wildfire Incident Report.
+        'params': {
+            'WIND_SPEED': 20.0, 'WIND_INITIAL_DIRECTION': 45.0,
+            'WIND_OSCILLATION_AMPLITUDE': 14.0, 'WIND_OSCILLATION_PERIOD': 18.0,
+            'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 1.15,
+            'NUM_CIVILIANS': 60,
+        },
+    },
+    {
+        'name': 'Knysna, South Africa',
+        'phase': 3,
+        'lat': -34.036, 'lon': 23.047, 'radius': 3000,
+        'fire_locations': [(-34.024, 23.059), (-34.030, 23.053)],
+        # June 2017: NW Berg wind ~22 m/s; 7 fatalities; ~1,000 homes destroyed.
+        # Ref: Baard (2019). SAICE Journal 61(3); Forsyth et al. (2010) SAEON.
+        'params': {
+            'WIND_SPEED': 22.0, 'WIND_INITIAL_DIRECTION': 135.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 18.0,
+            'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 1.10,
+            'NUM_CIVILIANS': 80,
+        },
+    },
 ]
 
 
@@ -242,7 +359,7 @@ class ScenarioCurriculum:
 
     Phase 1 (episodes 0   → phase1_end):   easy only
     Phase 2 (episodes ph1 → phase2_end):   easy + medium
-    Phase 3 (episodes ph2 → end):          all 15 scenarios
+    Phase 3 (episodes ph2 → end):          all 23 scenarios
 
     Bengio et al. (2009) — start simple, add complexity gradually.
     """

@@ -2,7 +2,7 @@
 AIGIS — Hybrid BDI+RL Evaluation
 ==================================
 Evaluates the trained hybrid system on:
-  1. All 15 training scenarios (in-distribution check, one per curriculum phase)
+  1. All 23 training scenarios (in-distribution check, one per curriculum phase)
   2. 9 held-out real-incident scenarios (OOD generalisation):
        Mati 2018, Camp Fire 2018, Pedrogao Grande 2017, Alexandroupoli 2023,
        Lahaina 2023, Black Saturday 2009, Tubbs Fire 2017, Peloponnese 2007,
@@ -211,17 +211,17 @@ def evaluate(
     print('AIGIS — Hybrid BDI+RL Evaluation')
     print('=' * 70)
     print('Grimm et al. (2020) ODD  |  Schulman et al. (2017) PPO')
-    print('15 training scenarios (phases 1-3) + 9 held-out real incidents')
+    print('23 training scenarios (phases 1-3) + 9 held-out real incidents')
     print(f'Runs per scenario: {num_runs}  |  Policy dir: {policy_dir}')
     print('=' * 70 + '\n')
 
     agents = _load_agents(policy_dir, device)
 
     all_rows = []
-    # All 15 curriculum training scenarios + 9 held-out real incidents = 24 total.
+    # All 23 curriculum training scenarios + 9 held-out real incidents = 32 total.
     # Training split confirms in-distribution generalisation across phases 1–3.
     # Held-out split measures OOD generalisation to real documented events.
-    eval_scenarios = list(SCENARIOS) + HELD_OUT  # 15 training + 9 held-out
+    eval_scenarios = list(SCENARIOS) + HELD_OUT  # 23 training + 9 held-out
 
     for scenario in eval_scenarios:
         name = scenario['name']

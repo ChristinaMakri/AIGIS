@@ -451,7 +451,7 @@ def _plot_training_curves(df: pd.DataFrame, out_path: str) -> None:
     fig, axes = plt.subplots(4, 2, figsize=(12, 16), facecolor=BG)
     fig.suptitle(
         'AIGIS MARL Training  |  Independent PPO (Schulman et al. 2017)\n'
-        'Curriculum: Bengio et al. (2009)  |  15 training scenarios  |  '
+        'Curriculum: Bengio et al. (2009)  |  23 training scenarios  |  '
         'Phases: P1 easy → P2 medium → P3 hard',
         color=FG, fontsize=9, fontweight='bold',
     )

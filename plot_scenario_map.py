@@ -1,8 +1,8 @@
 """
 Scenario World Map
 ==================
-Plots all 24 AIGIS scenarios on a world map:
-  - 15 training scenarios (circles, colour-coded by curriculum phase)
+Plots all 32 AIGIS scenarios on a world map:
+  - 23 training scenarios (circles, colour-coded by curriculum phase)
   - 9 held-out validation scenarios (triangles)
 
 Also produces a Mediterranean inset: scenario_map_mediterranean.png
@@ -45,6 +45,14 @@ TRAINING = [
     {'name': 'Woolsey Fire, USA',     'lat': 34.172,  'lon':-118.872, 'phase': 3},
     {'name': 'Thomas Fire, USA',      'lat': 34.354,  'lon':-119.065, 'phase': 3},
     {'name': 'Evia, Greece',          'lat': 38.953,  'lon':  23.150, 'phase': 3},
+    {'name': 'Corsica, France',       'lat': 42.302,  'lon':   9.148, 'phase': 1},
+    {'name': 'Tuscany, Italy',        'lat': 43.720,  'lon':  10.458, 'phase': 1},
+    {'name': 'Carmel, Israel',        'lat': 32.698,  'lon':  35.018, 'phase': 2},
+    {'name': 'Dwellingup, Australia', 'lat':-32.714,  'lon': 116.063, 'phase': 2},
+    {'name': 'Monchique, Portugal',   'lat': 37.322,  'lon':  -8.553, 'phase': 2},
+    {'name': 'Oristano, Italy',       'lat': 40.081,  'lon':   8.595, 'phase': 3},
+    {'name': 'Lytton, Canada',        'lat': 50.232,  'lon':-121.583, 'phase': 3},
+    {'name': 'Knysna, S. Africa',     'lat':-34.036,  'lon':  23.047, 'phase': 3},
 ]
 
 HELD_OUT = [
@@ -64,7 +72,7 @@ HELD_OUT = [
 # ---------------------------------------------------------------------------
 
 PHASE_COLORS  = {1: '#1976D2', 2: '#F57C00', 3: '#C62828'}
-PHASE_LABELS  = {1: 'Phase 1 — easy (3)', 2: 'Phase 2 — medium (5)', 3: 'Phase 3 — hard (7)'}
+PHASE_LABELS  = {1: 'Phase 1 — easy (5)', 2: 'Phase 2 — medium (8)', 3: 'Phase 3 — hard (10)'}
 HELD_COLOR    = '#2E7D32'
 MARKER_SIZE_W = 10   # world map
 MARKER_SIZE_M = 13   # Mediterranean map

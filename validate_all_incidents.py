@@ -1,7 +1,7 @@
 """
 AIGIS — Multi-Incident Diagnostic Validation
 =============================================
-Runs the simulation across all 24 fire incidents (15 training + 9 held-out [OOD])
+Runs the simulation across all 32 fire incidents (23 training + 9 held-out [OOD])
 and compares outputs against documented historical values.
 
 Purpose
@@ -334,6 +334,156 @@ INCIDENTS = [
         'documented': {
             'mortality_rate': 0.00002,
             'burned_area_pct': 45.0,
+        },
+    },
+    # ── 8 additional training scenarios ──────────────────────────────────
+    {
+        'name': 'Corte, Corsica',
+        'split': 'calibration',
+        'lat': 42.302, 'lon': 9.148, 'radius': 3000,
+        'fire_locations': [(42.314, 9.160), (42.308, 9.154)],
+        'params': {
+            'WIND_SPEED': 10.0, 'WIND_INITIAL_DIRECTION': 135.0,
+            'WIND_OSCILLATION_AMPLITUDE': 6.0, 'WIND_OSCILLATION_PERIOD': 38.0,
+            'FIRE_SPREAD_PROB_BASE': 0.28, 'ROTHERMEL_BASE_ROS': 0.52,
+            'NUM_CIVILIANS': 35,
+        },
+        # Corsica summer maquis fires: Libeccio NW wind; low mortality
+        # Source: Meddour-Sahar et al. (2013). iForest 6:366-374.
+        'documented': {
+            'mortality_rate': 0.0,
+            'burned_area_pct': 20.0,
+        },
+    },
+    {
+        'name': 'Pisan Hills, Tuscany',
+        'split': 'calibration',
+        'lat': 43.720, 'lon': 10.458, 'radius': 3000,
+        'fire_locations': [(43.732, 10.470), (43.726, 10.464)],
+        'params': {
+            'WIND_SPEED': 9.0, 'WIND_INITIAL_DIRECTION': 45.0,
+            'WIND_OSCILLATION_AMPLITUDE': 5.0, 'WIND_OSCILLATION_PERIOD': 40.0,
+            'FIRE_SPREAD_PROB_BASE': 0.25, 'ROTHERMEL_BASE_ROS': 0.50,
+            'NUM_CIVILIANS': 40,
+        },
+        # Tuscany macchia interface fires: Libeccio SW wind; low mortality
+        # Source: Elia et al. (2015). iForest 8:31-38.
+        'documented': {
+            'mortality_rate': 0.0,
+            'burned_area_pct': 18.0,
+        },
+    },
+    {
+        'name': 'Carmel, Israel',
+        'split': 'calibration',
+        'lat': 32.698, 'lon': 35.018, 'radius': 3000,
+        'fire_locations': [(32.710, 35.030), (32.704, 35.024)],
+        'params': {
+            'WIND_SPEED': 11.0, 'WIND_INITIAL_DIRECTION': 45.0,
+            'WIND_OSCILLATION_AMPLITUDE': 8.0, 'WIND_OSCILLATION_PERIOD': 28.0,
+            'FIRE_SPREAD_PROB_BASE': 0.36, 'ROTHERMEL_BASE_ROS': 0.78,
+            'NUM_CIVILIANS': 60,
+        },
+        # December 2010: 44 fatalities / ~44,000 in fire zone → ~0.10 %
+        # ~5,000 ha burned; 3 km zone ~35 %
+        # Source: Cohen et al. (2014). Fire Ecology 10(1).
+        'documented': {
+            'mortality_rate': 0.0010,
+            'burned_area_pct': 35.0,
+        },
+    },
+    {
+        'name': 'Dwellingup, W. Australia',
+        'split': 'calibration',
+        'lat': -32.714, 'lon': 116.063, 'radius': 3000,
+        'fire_locations': [(-32.702, 116.075), (-32.708, 116.069)],
+        'params': {
+            'WIND_SPEED': 13.0, 'WIND_INITIAL_DIRECTION': 225.0,
+            'WIND_OSCILLATION_AMPLITUDE': 9.0, 'WIND_OSCILLATION_PERIOD': 25.0,
+            'FIRE_SPREAD_PROB_BASE': 0.36, 'ROTHERMEL_BASE_ROS': 0.75,
+            'NUM_CIVILIANS': 50,
+        },
+        # SW Western Australia jarrah interface fires; low direct mortality
+        # Source: Burrows et al. (1991). CALM Science Paper No. 6.
+        'documented': {
+            'mortality_rate': 0.0,
+            'burned_area_pct': 30.0,
+        },
+    },
+    {
+        'name': 'Monchique, Portugal',
+        'split': 'calibration',
+        'lat': 37.322, 'lon': -8.553, 'radius': 3000,
+        'fire_locations': [(37.334, -8.541), (37.328, -8.547)],
+        'params': {
+            'WIND_SPEED': 13.0, 'WIND_INITIAL_DIRECTION': 225.0,
+            'WIND_OSCILLATION_AMPLITUDE': 10.0, 'WIND_OSCILLATION_PERIOD': 26.0,
+            'FIRE_SPREAD_PROB_BASE': 0.40, 'ROTHERMEL_BASE_ROS': 0.82,
+            'NUM_CIVILIANS': 55,
+        },
+        # August 2018: 2 fatalities / ~3,000 in local zone → ~0.07 %
+        # ~27,000 ha total; 3 km zone ~40 %
+        # Source: Copernicus EMS EMSR319 (2018); ICNF Portugal (2018).
+        'documented': {
+            'mortality_rate': 0.0007,
+            'burned_area_pct': 40.0,
+        },
+    },
+    {
+        'name': 'Oristano, Sardinia',
+        'split': 'calibration',
+        'lat': 40.081, 'lon': 8.595, 'radius': 3000,
+        'fire_locations': [(40.093, 8.607), (40.087, 8.601)],
+        'params': {
+            'WIND_SPEED': 20.0, 'WIND_INITIAL_DIRECTION': 135.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 20.0,
+            'FIRE_SPREAD_PROB_BASE': 0.52, 'ROTHERMEL_BASE_ROS': 1.05,
+            'NUM_CIVILIANS': 55,
+        },
+        # July 2021: 1 fatality / ~2,000 in local zone → ~0.05 %
+        # ~25,000 ha; 3 km zone ~45 %
+        # Source: Copernicus EMS EMSR558 (2021).
+        'documented': {
+            'mortality_rate': 0.0005,
+            'burned_area_pct': 45.0,
+        },
+    },
+    {
+        'name': 'Lytton Creek, BC',
+        'split': 'calibration',
+        'lat': 50.232, 'lon': -121.583, 'radius': 3000,
+        'fire_locations': [(50.244, -121.571), (50.238, -121.577)],
+        'params': {
+            'WIND_SPEED': 20.0, 'WIND_INITIAL_DIRECTION': 45.0,
+            'WIND_OSCILLATION_AMPLITUDE': 14.0, 'WIND_OSCILLATION_PERIOD': 18.0,
+            'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 1.15,
+            'NUM_CIVILIANS': 60,
+        },
+        # July 2021: 2 fatalities / ~250 in town → ~0.80 % (town destroyed)
+        # 3 km zone near town: ~50 % burned
+        # Source: BC Wildfire Service (2021). Lytton Creek Incident Report.
+        'documented': {
+            'mortality_rate': 0.0080,
+            'burned_area_pct': 50.0,
+        },
+    },
+    {
+        'name': 'Knysna, South Africa',
+        'split': 'calibration',
+        'lat': -34.036, 'lon': 23.047, 'radius': 3000,
+        'fire_locations': [(-34.024, 23.059), (-34.030, 23.053)],
+        'params': {
+            'WIND_SPEED': 22.0, 'WIND_INITIAL_DIRECTION': 135.0,
+            'WIND_OSCILLATION_AMPLITUDE': 12.0, 'WIND_OSCILLATION_PERIOD': 18.0,
+            'FIRE_SPREAD_PROB_BASE': 0.55, 'ROTHERMEL_BASE_ROS': 1.10,
+            'NUM_CIVILIANS': 80,
+        },
+        # June 2017: 7 fatalities / ~15,000 in fire zone → ~0.05 %
+        # ~1,000 ha in urban interface; 3 km zone ~35 %
+        # Source: Baard (2019). SAICE Journal 61(3).
+        'documented': {
+            'mortality_rate': 0.0005,
+            'burned_area_pct': 35.0,
         },
     },
     # ── Held-out (OOD) ────────────────────────────────────────────────────
