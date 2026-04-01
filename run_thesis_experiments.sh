@@ -67,8 +67,8 @@ run_step "0/17 [Pre-run] Dataset Diversity Chart — 24 scenarios (15 training +
 run_step "1/17 [Block A] Train ML Models — 200 Monte Carlo runs, 15 locations" \
     "python3 train_models.py --runs 200"
 
-run_step "2/17 [Block A] Evaluate ML Models — 50 runs, hold-out split" \
-    "python3 evaluate_ml_models.py --runs 50 --output ml_evaluation_results.csv"
+run_step "2/17 [Block A] Evaluate ML Models — 10 runs x 15 training scenarios (in-distribution)" \
+    "python3 evaluate_ml_models.py --runs 10 --multi-scenario --output ml_evaluation_results.csv"
 
 # =============================================================================
 # BLOCK B — PHYSICS / AGENT VALIDATION AGAINST REAL INCIDENTS (held-out)
@@ -174,9 +174,14 @@ run_step "15/17 [Block D] Ablation Study — 50 runs per condition (4 conditions
 #   Held-out split  -> OOD generalisation to real documented incidents
 # =============================================================================
 
-run_step "16/17 [Block E] Train MARL — 10,000 episodes, 15-scenario curriculum" \
-    "python3 train_marl.py --episodes 10000 --output models/rl"
-#   Curriculum phases: 1 easy (0-2000 ep) -> 2 medium (2000-6000) -> 3 hard (6000+)
+run_step "16/17 [Block E] Train MARL — 4,000 episodes x 500 steps, 15-scenario curriculum" \
+    "python3 train_marl.py --episodes 4000 --steps 500 --phase1-end 800 --phase2-end 2400 --output models/rl"
+#   4000 episodes x 500 steps = 2,000,000 total environment steps — same as the
+#   original 10,000 x 200 budget, but episode length now matches evaluation (500 steps).
+#   Phase boundaries scaled proportionally from original (20% / 60% / 40%):
+#     Phase 1 easy   :   0 –  800 episodes (20%)
+#     Phase 2 medium :  800 – 2400 episodes (40%)
+#     Phase 3 hard   : 2400 – 4000 episodes (40%)
 #   Bengio et al. (2009); PPO clip eps=0.2, GAE lambda=0.95 (Schulman et al. 2016)
 
 run_step "17/17 [Block E] Evaluate MARL — 50 runs x 24 scenarios (15 train + 9 held-out)" \

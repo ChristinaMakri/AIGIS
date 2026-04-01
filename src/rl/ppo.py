@@ -328,13 +328,20 @@ class PPOAgent:
     def save(self, path: str) -> None:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         torch.save({
-            'actor':  self.actor.state_dict(),
-            'critic': self.critic.state_dict(),
-            'role':   self.role,
+            'actor':      self.actor.state_dict(),
+            'critic':     self.critic.state_dict(),
+            'actor_opt':  self.actor_opt.state_dict(),
+            'critic_opt': self.critic_opt.state_dict(),
+            'role':       self.role,
         }, path)
 
     def load(self, path: str) -> None:
         ckpt = torch.load(path, map_location=self.device)
         self.actor.load_state_dict(ckpt['actor'])
         self.critic.load_state_dict(ckpt['critic'])
-        self.actor.eval()
+        if 'actor_opt' in ckpt:
+            self.actor_opt.load_state_dict(ckpt['actor_opt'])
+        if 'critic_opt' in ckpt:
+            self.critic_opt.load_state_dict(ckpt['critic_opt'])
+        self.actor.train()
+        self.critic.train()

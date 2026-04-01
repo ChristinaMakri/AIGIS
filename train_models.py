@@ -954,14 +954,9 @@ def _plot_training(metrics: dict, df: pd.DataFrame, out_path: str) -> None:
 
             # ── Row 1: Stage 2 scatter (non-zero test cases only) ──────────
             nz = m['nz_test']
-            reg = metrics[model_key].get('regressor')
-            if reg is not None and nz.sum() >= 2:
+            if nz.sum() >= 2:
                 y_nz_true = m['y_test'][nz]
-                y_nz_pred = np.maximum(0, reg.predict(
-                    # reuse scaler-transformed test — stored via combined pred
-                    # approximate: use combined / p_pos where p_pos > 0.1
-                    m['y_pred'][nz] / np.maximum(m['y_prob'][nz], 0.1)
-                ))
+                y_nz_pred = np.maximum(0, m['y_pred'][nz])
                 ax2.scatter(y_nz_pred, y_nz_true, color=colour, s=20, alpha=0.7)
                 lim = max(y_nz_true.max(), y_nz_pred.max()) * 1.1 + 1
                 ax2.plot([0, lim], [0, lim], color='white', linestyle='--',
@@ -1027,6 +1022,91 @@ def _plot_training(metrics: dict, df: pd.DataFrame, out_path: str) -> None:
 # CLI
 # ---------------------------------------------------------------------------
 
+def regen_training_plot(
+    csv_path: str = 'training_dataset.csv',
+    model_dir: str = 'models',
+    out_path: str = 'training_evaluation.png',
+) -> None:
+    """
+    Regenerate training_evaluation.png from saved models and training_dataset.csv,
+    without re-running any simulations.  Uses the same 80/20 split (seed=42).
+    """
+    df = pd.read_csv(csv_path)
+    X = df[FEATURE_NAMES].values
+
+    idx = np.arange(len(df))
+    idx_train, idx_test = train_test_split(idx, test_size=0.2,
+                                           random_state=42, shuffle=True)
+    X_train, X_test = X[idx_train], X[idx_test]
+
+    scaler = StandardScaler()
+    X_train_s = scaler.fit_transform(X_train)
+    X_test_s  = scaler.transform(X_test)
+
+    metrics = {}
+
+    for model_key, filename, target_col, model_type, label in MODEL_SPECS:
+        y       = df[target_col].values
+        y_test  = y[idx_test]
+        y_train = y[idx_train]
+
+        pkl_path = Path(model_dir) / filename
+        with open(pkl_path, 'rb') as f:
+            model_data = pickle.load(f)
+
+        if model_type == 'hurdle':
+            clf = model_data['classifier']
+            reg = model_data.get('regressor')
+
+            y_prob    = clf.predict_proba(X_test_s)[:, 1]
+            y_test_bin = (y_test > 0).astype(int)
+            nz_test   = y_test > 0
+            n_pos     = int((y_train > 0).sum())
+            n_neg     = int((y_train == 0).sum())
+            auc       = roc_auc_score(y_test_bin, y_prob)
+
+            e_count = np.maximum(0, reg.predict(X_test_s)) if reg is not None \
+                      else np.zeros(len(X_test_s))
+            y_pred_combined = y_prob * e_count
+
+            stage2_r2 = stage2_mae = float('nan')
+            if reg is not None and nz_test.sum() >= 2:
+                y_nz_pred = reg.predict(X_test_s[nz_test])
+                stage2_r2  = float(r2_score(y_test[nz_test], y_nz_pred))
+                stage2_mae = float(mean_absolute_error(y_test[nz_test], y_nz_pred))
+
+            metrics[model_key] = {
+                'classifier':  clf,
+                'regressor':   reg,
+                'auc':         auc,
+                'y_test':      y_test,
+                'y_pred':      y_pred_combined,
+                'y_prob':      y_prob,
+                'y_test_bin':  y_test_bin,
+                'nz_test':     nz_test,
+                'n_pos':       n_pos,
+                'n_neg':       n_neg,
+                'stage2_r2':   stage2_r2,
+                'stage2_mae':  stage2_mae,
+                'label':       label,
+                'test_r2':     float(r2_score(y_test, y_pred_combined)),
+                'test_mae':    float(mean_absolute_error(y_test, y_pred_combined)),
+            }
+        else:
+            model_obj = model_data['model']
+            y_pred    = np.maximum(0, model_obj.predict(X_test_s))
+            metrics[model_key] = {
+                'model':    model_obj,
+                'y_test':   y_test,
+                'y_pred':   y_pred,
+                'test_r2':  float(r2_score(y_test, y_pred)),
+                'test_mae': float(mean_absolute_error(y_test, y_pred)),
+                'label':    label,
+            }
+
+    _plot_training(metrics, df, out_path)
+
+
 def main():
     parser = argparse.ArgumentParser(
         description='Train AIGIS ML models on simulation-generated data'
@@ -1037,7 +1117,14 @@ def main():
                         help='Directory to save model pkl files (default: models/)')
     parser.add_argument('--seed',       type=int,   default=42,
                         help='Master RNG seed for reproducible data generation')
+    parser.add_argument('--plot-only',  action='store_true',
+                        help='Regenerate training_evaluation.png from saved models '
+                             'and training_dataset.csv without retraining')
     args = parser.parse_args()
+
+    if args.plot_only:
+        regen_training_plot()
+        return
 
     output_dir = Path(args.output_dir)
     output_dir.mkdir(exist_ok=True)

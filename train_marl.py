@@ -299,6 +299,7 @@ def train(
     phase1_end:       int = 2_000,
     phase2_end:       int = 6_000,
     training_steps:   int = 200,
+    start_episode:    int = 0,
 ) -> None:
     os.makedirs(output_dir, exist_ok=True)
 
@@ -309,6 +310,8 @@ def train(
     print('Bengio et al. (2009) Curriculum  |  12 training scenarios (3 phases)')
     print(f'Total episodes: {total_episodes}  |  Steps/episode: {training_steps}')
     print(f'Device: {device}  |  Output: {output_dir}')
+    if start_episode > 0:
+        print(f'Resuming from episode {start_episode}')
     print('=' * 70 + '\n')
 
     global_dim = _cfg.RL_GLOBAL_STATE_DIM  # 72  (FF:24 + RSC:22 + CMD:26)
@@ -319,18 +322,29 @@ def train(
         'cmd': PPOAgent('commander',   global_dim, device=device),
     }
 
+    if start_episode > 0:
+        for role, short in [('firefighter', 'ff'), ('rescuer', 'rsc'), ('commander', 'cmd')]:
+            path = os.path.join(output_dir, f'{short}.pt')
+            if not os.path.exists(path):
+                path = os.path.join(output_dir, f'{role}.pt')
+            agents[short].load(path)
+            print(f'  Loaded checkpoint: {path}')
+
     curriculum = ScenarioCurriculum(
         phase1_end=phase1_end,
         phase2_end=phase2_end,
         rng_seed=42,
     )
+    if start_episode > 0:
+        curriculum.advance(start_episode)
+        print(f'  Curriculum fast-forwarded to episode {start_episode} (phase {curriculum.current_curriculum_phase})\n')
 
     log_rows = []
     rolling_window = 100
     rewards_ff, rewards_rsc, rewards_cmd = [], [], []
     mort_hist, evac_hist = [], []
 
-    for ep in range(1, total_episodes + 1):
+    for ep in range(start_episode + 1, total_episodes + 1):
         scenario = curriculum.sample()
 
         stats = run_episode(
@@ -497,8 +511,10 @@ def main():
     p.add_argument('--steps',       type=int, default=200,
                    help='Max simulation steps per training episode')
     p.add_argument('--output',      type=str, default='models/rl')
-    p.add_argument('--phase1-end',  type=int, default=2_000)
-    p.add_argument('--phase2-end',  type=int, default=6_000)
+    p.add_argument('--phase1-end',     type=int, default=2_000)
+    p.add_argument('--phase2-end',     type=int, default=6_000)
+    p.add_argument('--start-episode',  type=int, default=0,
+                   help='Resume from this episode (loads checkpoints from --output dir)')
     args = p.parse_args()
 
     train(
@@ -509,6 +525,7 @@ def main():
         output_dir=args.output,
         phase1_end=args.phase1_end,
         phase2_end=args.phase2_end,
+        start_episode=args.start_episode,
     )
 
 
