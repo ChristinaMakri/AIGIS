@@ -168,7 +168,7 @@ run_step "15/17 [Block D] Ablation Study — 50 runs per condition (4 conditions
 
 # =============================================================================
 # BLOCK E — MARL TRAINING AND FULL EVALUATION
-# Train: 10,000 episodes over 15 curriculum scenarios (Bengio et al. 2009).
+# Train: 4,000 episodes x 500 steps over 15 curriculum scenarios (Bengio et al. 2009).
 # Evaluate: 50 runs x 24 scenarios (15 training + 9 held-out) = 1200 total.
 #   Training split  -> in-distribution generalisation check (phases 1-3)
 #   Held-out split  -> OOD generalisation to real documented incidents
