@@ -48,6 +48,13 @@ def terminal_reward_firefighter(burned_area_pct: float) -> float:
     """
     Terminal reward for firefighter at episode end.
     burned_area_pct in [0, 100].
+
+    Terminal scale ±10 (FF) / ±15 (Rescuer) / ±20 (Commander).
+    Intentionally larger for higher-level agents: Commander decisions have
+    macro impact (phase choice affects all civilians), Rescuer outcomes are
+    per-civilian, Firefighter outcomes are per-cell.  Each agent has its own
+    Adam optimiser so differing scales do not cause gradient interference
+    (independent PPO — Yu et al. 2022, MAPPO).
     """
     containment_reward = 10.0 * (1.0 - burned_area_pct / 100.0)
     burn_penalty       = -10.0 * (burned_area_pct / 100.0)

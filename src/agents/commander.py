@@ -171,6 +171,7 @@ class CommanderAgent(Agent):
         # Manages rescue missions using CNP (Call For Proposal → Propose → Accept/Reject)
         self.active_missions: Dict[str, Dict] = {}  # mission_id → mission_data
         self.pending_proposals: Dict[str, List[Message]] = {}  # cfp_id → list of proposals
+        self.cfp_issued_this_step: bool = False  # reset each act(); used by MARL reward
 
         # Re-evaluation throttling (avoid recalculating every step)
         self.last_evaluation_step = 0
@@ -813,6 +814,7 @@ class CommanderAgent(Agent):
         Execute decisions based on current phase.
         Implements 4-phase protocol based on ECT vs TTI.
         """
+        self.cfp_issued_this_step = False  # reset per-step flag
         # Store environment reference for ML predictions
         self.environment = environment
 
@@ -1007,6 +1009,7 @@ class CommanderAgent(Agent):
                 conversation_id=cfp_id,
             )
             self.send_message(cfp)
+            self.cfp_issued_this_step = True
             self.pending_proposals[cfp_id] = []
             already_targeted.add(civilian.agent_id)
 

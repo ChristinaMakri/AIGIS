@@ -206,7 +206,7 @@ def run_episode(
             water_used=ff_agent.water_capacity - ff_agent.current_water if ff_agent else 0,
             water_capacity=ff_agent.water_capacity if ff_agent else 5000,
             delta_burning=delta_burning,
-            fire_line_cells_created=0,
+            fire_line_cells_created=getattr(ff_agent, 'fire_lines_this_step', 0),
             is_refilling=ff_agent.is_refilling if ff_agent else False,
         )
         r_rsc = step_reward_rescuer(
@@ -228,7 +228,7 @@ def run_episode(
             rescuers_idle=sum(1 for r in env._rl_rescuer_agents
                               if getattr(r, 'mission_status', 'IDLE') == 'IDLE'),
             total_rescuers=max(len(env._rl_rescuer_agents), 1),
-            cfp_issued=False,
+            cfp_issued=getattr(cmd_agent, 'cfp_issued_this_step', False),
         )
 
         total_r['ff']  += r_ff
@@ -431,20 +431,23 @@ def _role_name(short: str) -> str:
 
 def _plot_training_curves(df: pd.DataFrame, out_path: str) -> None:
     """
-    6-panel training diagnostic figure (3 rows x 2 cols):
+    8-panel training diagnostic figure (4 rows x 2 cols):
       Row 1: Mortality rate | Evacuation success rate
       Row 2: Firefighter reward | Rescuer reward
-      Row 3: Mean policy entropy (all agents) | Mean critic loss (all agents)
+      Row 3: Commander reward | Mean policy entropy (all agents)
+      Row 4: Mean critic loss (all agents) | (blank / reserved)
 
+    Commander reward was previously missing — added so all three agent
+    learning signals are visible for diagnosis.
     Entropy and critic loss panels follow the MARL diagnostics standard:
       Yu et al. (2022). MAPPO. NeurIPS. arXiv:2103.01955.
       Cooperative MARL Diagnostics (2023). arXiv:2312.08468.
-    Curriculum phase boundaries (episodes 2000, 6000) marked as vertical lines.
+    Curriculum phase boundaries marked as vertical lines.
     """
-    fig, axes = plt.subplots(3, 2, figsize=(12, 12), facecolor=BG)
+    fig, axes = plt.subplots(4, 2, figsize=(12, 16), facecolor=BG)
     fig.suptitle(
         'AIGIS MARL Training  |  Independent PPO (Schulman et al. 2017)\n'
-        'Curriculum: Bengio et al. (2009)  |  12 training scenarios  |  '
+        'Curriculum: Bengio et al. (2009)  |  15 training scenarios  |  '
         'Phases: P1 easy → P2 medium → P3 hard',
         color=FG, fontsize=9, fontweight='bold',
     )
@@ -467,11 +470,15 @@ def _plot_training_curves(df: pd.DataFrame, out_path: str) -> None:
         (axes[0, 1], 'evacuation',      'Evacuation Success Rate',      '#06d6a0'),
         (axes[1, 0], 'reward_ff',       'Firefighter Reward',           '#ffd60a'),
         (axes[1, 1], 'reward_rsc',      'Rescuer Reward',               '#fb5607'),
-        (axes[2, 0], 'entropy_mean',    'Mean Policy Entropy (3 roles)', '#3a86ff'),
-        (axes[2, 1], 'critic_loss_mean','Mean Critic Loss (3 roles)',    '#8338ec'),
+        (axes[2, 0], 'reward_cmd',      'Commander Reward',             '#8338ec'),
+        (axes[2, 1], 'entropy_mean',    'Mean Policy Entropy (3 roles)', '#3a86ff'),
+        (axes[3, 0], 'critic_loss_mean','Mean Critic Loss (3 roles)',    '#06d6a0'),
     ]
 
-    phase_eps = [2000, 6000]   # curriculum phase boundaries (Bengio et al. 2009)
+    # Hide the unused bottom-right panel
+    axes[3, 1].set_visible(False)
+
+    phase_eps = [800, 2400]   # curriculum phase boundaries (Bengio et al. 2009)
 
     for ax, col, label, colour in plots:
         ax.set_facecolor(PANEL)

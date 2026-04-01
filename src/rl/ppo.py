@@ -198,6 +198,10 @@ class PPOAgent:
         Returns (action_index, log_probability).
         Used both during training rollouts and at test time.
         """
+        assert obs.shape == (self.obs_dim,), (
+            f"[PPO/{self.role}] act(): expected obs shape ({self.obs_dim},), "
+            f"got {obs.shape}"
+        )
         x = torch.FloatTensor(obs).unsqueeze(0).to(self.device)
         probs = self.actor(x).squeeze(0)
         dist = Categorical(probs)
@@ -207,6 +211,10 @@ class PPOAgent:
     @torch.no_grad()
     def value(self, global_obs: np.ndarray) -> float:
         """Estimate V(s) from global state."""
+        assert global_obs.shape == (self.global_state_dim,), (
+            f"[PPO/{self.role}] value(): expected global_obs shape ({self.global_state_dim},), "
+            f"got {global_obs.shape}"
+        )
         x = torch.FloatTensor(global_obs).unsqueeze(0).to(self.device)
         return float(self.critic(x).item())
 

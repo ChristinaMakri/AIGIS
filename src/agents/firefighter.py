@@ -127,6 +127,7 @@ class FirefighterAgent(Agent):
         # === MISSION STATE ===
         self.target_fire = None  # (row, col) of target fire cell
         self.suppression_strategy = None  # 'water', 'fire_line', 'backburn'
+        self.fire_lines_this_step = 0  # cells cleared as fire line this step (reset in act)
 
         # === CNP MISSION TRACKING ===
         self.current_mission: Optional[dict] = None
@@ -354,6 +355,7 @@ class FirefighterAgent(Agent):
         """
         Execute suppression action based on chosen strategy.
         """
+        self.fire_lines_this_step = 0  # reset per-step counter
         # Handle refilling
         if self.is_refilling:
             self.refill_counter += 1
@@ -480,6 +482,7 @@ class FirefighterAgent(Agent):
                                  0, environment.grid_shape[1] - 1))
                 if environment.fire_grid[nr, nc] == 3:  # Fuel
                     environment.fire_grid[nr, nc] = 0   # Remove fuel
+                    self.fire_lines_this_step += 1
                     print(f"  [{self.agent_id}]: fire line (wind-perp) at ({nr}, {nc})")
         else:
             # Fallback: axis-aligned line when wind data unavailable
@@ -488,6 +491,7 @@ class FirefighterAgent(Agent):
                                       0, environment.grid_shape[0] - 1))
                 if environment.fire_grid[new_row, fire_col] == 3:
                     environment.fire_grid[new_row, fire_col] = 0
+                    self.fire_lines_this_step += 1
                     print(f"  [{self.agent_id}]: fire line at ({new_row}, {fire_col})")
 
         self.target_fire = None
