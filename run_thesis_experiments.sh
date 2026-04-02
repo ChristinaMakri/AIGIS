@@ -166,8 +166,8 @@ run_step "14/17 [Block D] Sobol Sensitivity Analysis — N=512 (7168 model runs)
 #   for D=6 parameters.  N=128 is exploratory only; N=512 gives publication-quality
 #   95 % CI on total-effect indices STi.
 
-run_step "15/17 [Block D] Ablation Study — 50 runs per condition (4 conditions)" \
-    "python3 run_ablation.py --runs 50 --output ablation_results.csv"
+run_step "15/17 [Block D] Ablation Study — 100 runs per condition (4 conditions)" \
+    "python3 run_ablation.py --runs 100 --output ablation_results.csv"
 
 # =============================================================================
 # BLOCK E — MARL TRAINING AND FULL EVALUATION
