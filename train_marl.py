@@ -339,6 +339,31 @@ def train(
         curriculum.advance(start_episode)
         print(f'  Curriculum fast-forwarded to episode {start_episode} (phase {curriculum.current_curriculum_phase})\n')
 
+    # ── Convergence tracking ────────────────────────────────────────────────
+    # Operational convergence criterion: rolling mean total reward does not
+    # improve by more than 1 % over the last CONV_WINDOW consecutive episodes.
+    #
+    # Why this criterion is included
+    # --------------------------------
+    # Fixed episode budgets (the most common practice in MARL papers) declare
+    # convergence by inspection of training curves (Yu et al. 2022 NeurIPS;
+    # de Witt et al. 2020 arXiv:2011.09533).  A rolling-window variance threshold
+    # provides a more principled stopping criterion, is directly citable, and lets
+    # the thesis report the episode at which each seed converged rather than just
+    # "we ran N episodes."
+    #
+    # References
+    # ----------
+    # Yu, C. et al. (2022). "The Surprising Effectiveness of PPO in Cooperative
+    #   Multi-Agent Games." NeurIPS 2022. arXiv:2103.01955.
+    #   [Training curves reported as rolling mean over final evaluations per seed.]
+    # de Witt, C.S. et al. (2020). "Is Independent Learning All You Need in the
+    #   StarCraft Multi-Agent Challenge?" arXiv:2011.09533.
+    #   [IPPO convergence declared by plateau in win-rate rolling mean.]
+    CONV_WINDOW     = 500   # rolling window length (episodes)
+    CONV_THRESHOLD  = 0.01  # 1 % relative improvement threshold
+    convergence_episode = None   # episode at which convergence criterion first met
+
     log_rows = []
     rolling_window = 100
     rewards_ff, rewards_rsc, rewards_cmd = [], [], []
@@ -368,29 +393,59 @@ def train(
         mort_hist.append(stats['mortality_rate'])
         evac_hist.append(stats['evacuation_success_rate'])
 
+        # ── Check convergence criterion ─────────────────────────────────────
+        # Total reward = sum across all three roles (joint performance proxy).
+        # Convergence: rolling mean does not improve by > 1 % over CONV_WINDOW
+        # episodes.  Record the episode number once, then continue training to
+        # completion (fixed budget — criterion is diagnostic, not a hard stop).
+        # de Witt et al. (2020); Yu et al. (2022).
+        total_reward_this_ep = (stats['reward_ff'] + stats['reward_rsc']
+                                + stats['reward_cmd'])
+        all_rewards_combined = (rewards_ff[-1] + rewards_rsc[-1] + rewards_cmd[-1])
+        _combined_rewards = [rf + rr + rc
+                             for rf, rr, rc in zip(rewards_ff, rewards_rsc, rewards_cmd)]
+        if (convergence_episode is None
+                and len(_combined_rewards) >= CONV_WINDOW):
+            window = _combined_rewards[-CONV_WINDOW:]
+            half   = CONV_WINDOW // 2
+            mean_old = float(np.mean(window[:half]))
+            mean_new = float(np.mean(window[half:]))
+            if mean_old != 0:
+                rel_improvement = abs(mean_new - mean_old) / abs(mean_old)
+            else:
+                rel_improvement = abs(mean_new - mean_old)
+            if rel_improvement < CONV_THRESHOLD:
+                convergence_episode = ep
+                print(f"\n  [Convergence] Rolling mean reward plateau at episode {ep} "
+                      f"(rel. improvement {rel_improvement:.4f} < {CONV_THRESHOLD}). "
+                      f"de Witt et al. (2020); Yu et al. (2022).")
+
         log_rows.append({
-            'episode':          ep,
-            'scenario':         stats['scenario'],
-            'curriculum':       curriculum.current_curriculum_phase,
-            'mortality':        stats['mortality_rate'],
-            'evacuation':       stats['evacuation_success_rate'],
-            'burned_pct':       stats['burned_area_pct'],
-            'reward_ff':        stats['reward_ff'],
-            'reward_rsc':       stats['reward_rsc'],
-            'reward_cmd':       stats['reward_cmd'],
+            'episode':             ep,
+            'scenario':            stats['scenario'],
+            'curriculum':          curriculum.current_curriculum_phase,
+            'mortality':           stats['mortality_rate'],
+            'evacuation':          stats['evacuation_success_rate'],
+            'burned_pct':          stats['burned_area_pct'],
+            'reward_ff':           stats['reward_ff'],
+            'reward_rsc':          stats['reward_rsc'],
+            'reward_cmd':          stats['reward_cmd'],
             # Actor losses — all three roles (Yu et al. 2022 MAPPO logging standard)
-            'loss_actor_ff':    losses['ff'].get('actor_loss',  0),
-            'loss_actor_rsc':   losses['rsc'].get('actor_loss', 0),
-            'loss_actor_cmd':   losses['cmd'].get('actor_loss', 0),
+            'loss_actor_ff':       losses['ff'].get('actor_loss',  0),
+            'loss_actor_rsc':      losses['rsc'].get('actor_loss', 0),
+            'loss_actor_cmd':      losses['cmd'].get('actor_loss', 0),
             # Critic losses — convergence diagnostic (Yu et al. 2022)
-            'loss_critic_ff':   losses['ff'].get('critic_loss',  0),
-            'loss_critic_rsc':  losses['rsc'].get('critic_loss', 0),
-            'loss_critic_cmd':  losses['cmd'].get('critic_loss', 0),
+            'loss_critic_ff':      losses['ff'].get('critic_loss',  0),
+            'loss_critic_rsc':     losses['rsc'].get('critic_loss', 0),
+            'loss_critic_cmd':     losses['cmd'].get('critic_loss', 0),
             # Policy entropy — exploration/exploitation diagnostic (Yu et al. 2022;
             # MARL Diagnostics paper, arXiv:2312.08468)
-            'entropy_ff':       losses['ff'].get('entropy',  0),
-            'entropy_rsc':      losses['rsc'].get('entropy', 0),
-            'entropy_cmd':      losses['cmd'].get('entropy', 0),
+            'entropy_ff':          losses['ff'].get('entropy',  0),
+            'entropy_rsc':         losses['rsc'].get('entropy', 0),
+            'entropy_cmd':         losses['cmd'].get('entropy', 0),
+            # Convergence flag — episode at which rolling-window criterion was met
+            # (de Witt et al. 2020; Yu et al. 2022)
+            'converged_at':        convergence_episode if convergence_episode is not None else 0,
         })
 
         if ep % log_every == 0:
@@ -421,6 +476,15 @@ def train(
     log_path = 'marl_training_log.csv'
     df_log.to_csv(log_path, index=False)
     print(f"\nTraining log saved to: {log_path}")
+
+    if convergence_episode is not None:
+        print(f"Convergence criterion met at episode {convergence_episode} / {total_episodes} "
+              f"(rolling-window plateau, CONV_WINDOW={CONV_WINDOW}, threshold={CONV_THRESHOLD}).")
+        print("de Witt et al. (2020) arXiv:2011.09533  |  Yu et al. (2022) NeurIPS.")
+    else:
+        print(f"Convergence criterion not met within {total_episodes} episodes "
+              f"(CONV_WINDOW={CONV_WINDOW}, threshold={CONV_THRESHOLD}). "
+              "Consider increasing --episodes.")
 
     _plot_training_curves(df_log, 'marl_training_curves.png')
 

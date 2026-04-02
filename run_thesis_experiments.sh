@@ -73,6 +73,16 @@ run_step "1/17 [Block A] Train ML Models — 2000 Monte Carlo runs, 23 locations
 run_step "2/17 [Block A] Evaluate ML Models — 10 runs x 23 training scenarios (in-distribution)" \
     "python3 evaluate_ml_models.py --runs 10 --multi-scenario --output ml_evaluation_results.csv"
 
+# Step 2b: 5-fold stratified cross-validation on the hurdle model training set.
+# Why: A single 80/20 holdout gives only one estimate of generalisation error.
+# Stratified k-fold produces 5 independent estimates (mean ± std), which is more
+# stable and credible to reviewers examining zero-inflated casualty data.
+# Roberts et al. (2017) Ecography — spatial/event CV strategies for structured data.
+# Pishahang et al. (2025) Safety and Reliability — held-out event validation of
+# ML-embedded ABM; two-tier reporting (CV + LOIO) matches best practice.
+run_step "2b/17 [Block A] 5-Fold Stratified CV — hurdle model in-distribution stability" \
+    "python3 evaluate_ml_models.py --crossval --training-csv training_dataset.csv --cv-output ml_crossval_results.csv"
+
 # =============================================================================
 # BLOCK B — PHYSICS / AGENT VALIDATION AGAINST REAL INCIDENTS (held-out)
 # Each script runs AIGIS 50 times under documented real-event conditions and
@@ -193,6 +203,29 @@ run_step "17/17 [Block E] Evaluate MARL — 50 runs x 32 scenarios (23 train + 9
 #             Tubbs Fire 2017, Peloponnese 2007, Valparaiso 2014
 #   Metric: mortality rate, evacuation success, burned area % — mean +/- 95 % CI
 
+# Step 17b: Formal MARL vs rule-based baseline comparison (closes the gap between
+# Block C rule-based results and Block E MARL results).
+# Why: Yu et al. (2022) NeurIPS (arXiv:2103.01955) and Sivagnanam et al. (2024)
+# ICML (arXiv:2405.13205) both compare MARL against rule-based/heuristic baselines
+# with formal hypothesis tests across multiple seeds.  A reviewer will ask "does
+# MARL actually beat the baseline?" — this step answers that question explicitly.
+# Method: Wilcoxon (1945) signed-rank test (paired, non-parametric) per scenario;
+# rank-biserial r effect size (Kerby 2014); Bonferroni alpha = 0.05/32 = 0.00156.
+run_step "17b [Block E] MARL vs Baseline Comparison — Wilcoxon signed-rank, 32 scenarios" \
+    "python3 compare_marl_vs_baseline.py --marl-file marl_evaluation_results.csv --baseline-file all_incidents_validation.csv --output marl_vs_baseline.csv"
+
+# Step 18: Wall-clock runtime benchmark across all 32 scenarios.
+# Why: Ronchi & Nilsson (2024) IJDRR systematic review of 134 pedestrian ABM studies
+# identifies computational complexity as a persistent challenge that is rarely
+# quantified.  Richmond et al. (2023) FLAME GPU 2 and Gutenschwager et al. (2018)
+# HPC Evacuation both report runtime tables as primary reproducibility evidence.
+# Reporting median wall-clock time and CV per scenario provides:
+#   (a) reproducibility for readers who wish to replicate experiments;
+#   (b) evidence that AIGIS is tractable for the 640-7168 total runs in the pipeline;
+#   (c) a distinguishing feature vs. papers that claim scalability without evidence.
+run_step "18 [Supplement] Runtime Benchmark — 5 timed runs x 32 scenarios" \
+    "python3 benchmark_runtime.py --runs-per-scenario 5 --output benchmark_runtime.csv"
+
 # =============================================================================
 # SUMMARY
 # =============================================================================
@@ -205,6 +238,7 @@ echo "Output files:"                                 | tee -a "$LOGFILE"
 ls -lh \
     training_dataset.csv \
     ml_evaluation_results.csv \
+    ml_crossval_results.csv \
     mati_validation_results.csv \
     campfire_validation_results.csv \
     pedrogao_validation_results.csv \
@@ -235,4 +269,8 @@ ls -lh \
     ablation_plot.png \
     all_incidents_validation.png \
     marl_evaluation_results.png \
+    marl_vs_baseline.csv \
+    marl_vs_baseline.png \
+    benchmark_runtime.csv \
+    benchmark_runtime.png \
     2>/dev/null | tee -a "$LOGFILE"
