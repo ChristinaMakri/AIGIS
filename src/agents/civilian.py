@@ -1,6 +1,6 @@
 """
 Civilian Agent - BDI (Belief-Desire-Intention) Architecture
-Implements Greenshields' Traffic Model + Social Force Model (Herding)
+Implements LWR triangular fundamental diagram + Social Force Model (Herding)
 Features 3-state cognitive machine: Rational, Confused, Herding
 Panic equation with fire distance and family separation factors
 
@@ -9,11 +9,23 @@ BDI architecture:
   "BDI agents: From theory to practice."
   Proceedings of ICMAS-95, pp. 312–319. AAAI Press.
 
-Greenshields' macroscopic traffic-flow model (speed–density relation):
-  Greenshields, B.D., Bibbins, J.R., Channing, W.S., & Miller, H.H. (1935).
-  "A study of traffic capacity."
-  Highway Research Board Proceedings, 14, pp. 448–477.
-  Formula: V = V_free × (1 − ρ / ρ_jam)
+LWR macroscopic traffic-flow model (triangular fundamental diagram):
+  Lighthill, M.J. & Whitham, G.B. (1955).
+  "On kinematic waves II: A theory of traffic flow on long crowded roads."
+  Proceedings of the Royal Society A, 229(1178), pp. 317–345.
+
+  Richards, P.I. (1956).
+  "Shock waves on the highway."
+  Operations Research, 4(1), pp. 42–51.
+
+  Triangular diagram calibration for pedestrian evacuation flow:
+  Daamen, W. & Hoogendoorn, S.P. (2003).
+  "Experimental research of pedestrian walking behavior."
+  Transportation Research Record, 1828, pp. 20–30.
+
+  Free-flow:  ρ ≤ ρ_crit  →  v = v_free
+  Congested:  ρ > ρ_crit  →  v = w × (ρ_jam / ρ − 1)
+  where w = v_free × ρ_crit / (ρ_jam − ρ_crit)  [backward wave speed]
 
 Evacuation micro-simulation in the wildland–urban interface:
   Cova, T.J. & Johnson, J.P. (2002).
@@ -61,7 +73,7 @@ class CivilianAgent(Agent):
       • cognitive_state     rational | confused | herding
       • fire_visible        fire within vision radius
       • fire_distance       distance to nearest visible fire (grid cells)
-      • current_speed       actual movement speed (Greenshields model)
+      • current_speed       actual movement speed (LWR triangular diagram)
       • current_aqi         air quality index (smoke effects on speed/panic)
       • is_evacuated        has reached a safe zone
       • has_family          30% of civilians have family (psychological factor)
@@ -100,9 +112,10 @@ class CivilianAgent(Agent):
       [1] Rao, A.S. & Georgeff, M.P. (1995). "BDI agents: From theory to
           practice." ICMAS-95, pp. 312–319. AAAI Press.
           BDI belief-revision and intention-selection cycle.
-      [2] Greenshields, B.D. et al. (1935). "A study of traffic capacity."
-          Highway Research Board Proceedings, 14, pp. 448–477.
-          Speed–density: V = V_free × (1 − ρ/ρ_jam)
+      [2] Lighthill, M.J. & Whitham, G.B. (1955). "On kinematic waves II."
+          Proc. R. Soc. A, 229(1178), pp. 317–345.  LWR triangular diagram:
+          free-flow v=v_free (ρ≤ρ_crit); congested v=w(ρ_jam/ρ−1) (ρ>ρ_crit).
+          Calibration: Daamen & Hoogendoorn (2003) Transp. Res. Rec. 1828:20-30.
       [3] Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of
           neighborhood evacuations in the urban-wildland interface."
           Environment and Planning A, 34(12), pp. 2211–2229.
@@ -119,7 +132,7 @@ class CivilianAgent(Agent):
         Initialize a civilian agent with BDI architecture and panic psychology.
 
         Key Features:
-        - Greenshields traffic model: Speed decreases with crowd density
+        - LWR triangular traffic model: free-flow until ρ_crit, then congested
         - 3-state cognitive machine: Rational → Confused → Herding
         - Panic equation: Increases with fire proximity and family separation
         - Social force herding: Follows crowd at high panic levels
@@ -161,7 +174,7 @@ class CivilianAgent(Agent):
         self.current_node: Optional[int] = None  # Current graph node
         self.safety_node: Optional[int] = None  # Target safe zone node
         self.current_path: List[int] = []  # Planned path (list of node IDs)
-        self.current_edge_density = 0.0  # Local agent density on current edge (for Greenshields)
+        self.current_edge_density = 0.0  # Local agent density on current edge (for LWR model)
         self.evacuation_ordered = False  # Commander ordered evacuation
         self.redirect_to_coast = False  # Shelter-in-place order (Phase 3)
         self.is_evacuated = False  # True once civilian reaches a safe zone
@@ -323,7 +336,7 @@ class CivilianAgent(Agent):
         # Determine cognitive state based on panic level
         self._update_cognitive_state()
 
-        # Assess local traffic density (Greenshields model)
+        # Assess local traffic density (LWR model)
         self._assess_local_density(environment)
 
         # Note: nearby_agents will be populated by simulation
@@ -424,7 +437,7 @@ class CivilianAgent(Agent):
         STATE 1: RATIONAL (Panic < 0.4)
         - Optimal decision making
         - Uses A* pathfinding to nearest safe zone
-        - Considers traffic conditions (Greenshields model)
+        - Considers traffic conditions (LWR model)
         - Full speed when road is clear
 
         STATE 2: CONFUSED (0.4 ≤ Panic < 0.7)
@@ -452,7 +465,7 @@ class CivilianAgent(Agent):
 
     def _assess_local_density(self, environment) -> None:
         """
-        Assess local agent density for Greenshields' traffic model.
+        Assess local agent density for LWR traffic model.
         Counts nearby agents within a 2-cell radius to simulate edge density.
         Uses nearby_agents from the previous step (populated by simulation after update).
         """
@@ -556,25 +569,38 @@ class CivilianAgent(Agent):
             else:
                 self.intentions = ['move_random']  # Panic movement
 
-    def _calculate_speed_greenshields(self) -> float:
+    def _calculate_speed_lwr(self) -> float:
         """
-        Calculate current speed using Greenshields' macroscopic traffic model.
+        Calculate current speed using the LWR triangular fundamental diagram.
 
-        V_current = V_free × (1 − ρ_local / ρ_jam)
+        Free-flow  (ρ ≤ ρ_crit):  v = v_free
+        Congested  (ρ > ρ_crit):  v = w × (ρ_jam / ρ − 1)
+          where w = v_free × ρ_crit / (ρ_jam − ρ_crit)  [backward wave speed]
 
-        The linear speed–density relationship was first described in:
-          Greenshields, B.D., Bibbins, J.R., Channing, W.S., & Miller, H.H. (1935).
-          "A study of traffic capacity."
-          Highway Research Board Proceedings, 14, pp. 448–477.
+        ρ_crit is set to ρ_jam / 4, matching Daamen & Hoogendoorn (2003) pedestrian
+        flow measurements (critical density ≈ 25 % of jam density at ~1.34 m/s).
 
-        Extended here with an AQI smoke penalty (Inness et al., 2019) and a
-        cognitive-state modifier (Cova & Johnson, 2002).
+        References
+        ----------
+        Lighthill & Whitham (1955) Proc. R. Soc. A 229:317-345
+        Richards (1956) Oper. Res. 4:42-51
+        Daamen & Hoogendoorn (2003) Transp. Res. Rec. 1828:20-30
+
+        Extended with an AQI smoke penalty (Inness et al. 2019) and a
+        cognitive-state modifier (Cova & Johnson 2002).
         """
-        if self.current_edge_density >= self.rho_jam:
-            # Gridlock!
-            return 0.0
+        rho = self.current_edge_density
 
-        speed = self.v_free_flow * (1 - (self.current_edge_density / self.rho_jam))
+        if rho >= self.rho_jam:
+            return 0.0  # Gridlock
+
+        rho_crit = self.rho_jam / 4.0
+        if rho <= rho_crit:
+            speed = self.v_free_flow
+        else:
+            # Backward wave speed derived from flow continuity at critical point
+            w = self.v_free_flow * rho_crit / (self.rho_jam - rho_crit)
+            speed = w * (self.rho_jam / rho - 1.0)
 
         # ===== SMOKE / AQI SPEED PENALTY =====
         # High AQI (smoke inhalation, reduced visibility) slows movement.
@@ -587,11 +613,11 @@ class CivilianAgent(Agent):
         if self.cognitive_state == "confused":
             speed *= CIVILIAN_CONFUSED_SPEED_FACTOR
 
-        return max(0, speed)
+        return max(0.0, speed)
 
     def act(self, environment) -> None:
         """
-        Execute intentions using Greenshields' traffic model.
+        Execute intentions using LWR triangular fundamental diagram.
         Speed depends on local density and cognitive state.
         """
         if not self.intentions:
@@ -617,8 +643,8 @@ class CivilianAgent(Agent):
                 self.send_message(injury_msg)
             return  # Injured civilians cannot move — await ambulance
 
-        # Calculate current speed based on traffic density
-        self.current_speed = self._calculate_speed_greenshields()
+        # Calculate current speed based on traffic density (LWR triangular diagram)
+        self.current_speed = self._calculate_speed_lwr()
 
         primary_intention = self.intentions[0]
 
@@ -834,7 +860,7 @@ class CivilianAgent(Agent):
                     self.safety_node = environment.find_nearest_safe_node(self.current_node)
                     self.current_path = []
 
-            # Move along path using Greenshields' speed (already calculated)
+            # Move along path using LWR speed (already calculated in act())
             if self.current_path and len(self.current_path) > 1 and self.current_speed > 0.1:
                 next_node = self.current_path[1]
 
