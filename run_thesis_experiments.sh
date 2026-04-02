@@ -155,7 +155,7 @@ run_step "13/17 [Block C] Multi-Incident Diagnostic — 20 runs x 32 incidents (
 # Sobol global variance-based sensitivity (Saltelli et al. 2010):
 #   N=512 base -> 7168 total model evaluations.
 #   Outputs: S1 (first-order) and ST (total-effect) indices with 95 % CI.
-# Ablation (4 conditions x 50 runs = 200 total):
+# Ablation (4 conditions x 100 runs = 400 total):
 #   Baseline | No-CNP | No-Panic | No-Coordination
 #   Mann-Whitney U + rank-biserial effect size (alpha=0.017 Bonferroni).
 # =============================================================================
