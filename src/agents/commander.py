@@ -462,8 +462,9 @@ class CommanderAgent(Agent):
         Return indices of actions safe under BDI protocol constraints.
         Masks out actions that violate BDI operational rules before PPO argmax.
 
-        Sardina, S. & Thangarajah, J. (2011). "On the deployment of BDI agents
-        in the presence of learning algorithms." Proc. 22nd IJCAI, pp. 1810-1815.
+        Singh, D., Sardina, S., Padgham, L., & James, G. (2011). "Integrating
+        Learning into a BDI Agent for Environments with Changing Dynamics."
+        Proc. 22nd IJCAI, pp. 2525-2530. DOI: 10.5591/978-1-57735-516-8/IJCAI11-420.
 
         Actions: 0=maintain, 1=advance, 2=hold_prealert, 3=force_evacuate,
                  4=shelter, 5=reassure

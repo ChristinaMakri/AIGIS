@@ -143,9 +143,11 @@ class CivilianAgent(Agent):
         """
         super().__init__(agent_id, position)
 
-        # ===== GREENSHIELDS TRAFFIC MODEL PARAMETERS =====
-        # V_current = V_free × (1 - ρ_local / ρ_jam)
-        # When density reaches jam density, speed → 0 (gridlock)
+        # ===== LWR TRIANGULAR FUNDAMENTAL DIAGRAM PARAMETERS =====
+        # Free-flow  (ρ ≤ ρ_crit):  v = v_free
+        # Congested  (ρ > ρ_crit):  v = w × (ρ_jam / ρ − 1)
+        # where w = v_free × ρ_crit / (ρ_jam − ρ_crit)  [backward wave speed]
+        # ρ_crit = ρ_jam / 4  (Daamen & Hoogendoorn 2003)
         self.v_free_flow = CIVILIAN_V_FREE_FLOW  # Maximum speed when road is empty
         self.rho_jam = CIVILIAN_RHO_JAM  # Jam density (agents per edge)
         self.current_speed = self.v_free_flow  # Current actual speed

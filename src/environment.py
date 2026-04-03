@@ -41,6 +41,7 @@ from .config import (
     CLC_TO_NFFL_MAP,
     DEFAULT_FUEL_MODEL
 )
+from .data_connectors.srtm_connector import SRTMConnector
 
 
 class Environment:
@@ -579,47 +580,29 @@ class LiveMapBuilder:
 
     def _generate_perlin_terrain(self) -> np.ndarray:
         """
-        Generate realistic terrain using real SRTM elevation data or Perlin Noise fallback.
-        Returns elevation grid in meters.
+        Fetch real SRTM elevation via OpenTopoData API, or fall back to
+        Perlin Noise terrain when the network is unavailable.
+
+        SRTM reference:
+          Farr, T. G. et al. (2007). "The Shuttle Radar Topography Mission."
+          Reviews of Geophysics, 45(2), RG2004. DOI: 10.1029/2005RG000183.
         """
-        # Try to load real elevation data first
-        from pathlib import Path
-        elevation_file = Path("data/elevation_data.npz")
-
-        if elevation_file.exists():
-            try:
-                print("  📊 Loading real SRTM elevation data...")
-                elev_data = np.load(elevation_file)
-
-                # Check if location matches (within reasonable tolerance)
-                saved_lat = float(elev_data['latitude'])
-                saved_lon = float(elev_data['longitude'])
-                saved_radius = float(elev_data['radius'])
-
-                lat_diff = abs(saved_lat - self.center[0])
-                lon_diff = abs(saved_lon - self.center[1])
-                radius_diff = abs(saved_radius - self.radius)
-
-                # Allow 0.1 degree (~11km) and 20% radius difference
-                if lat_diff < 0.1 and lon_diff < 0.1 and radius_diff < self.radius * 0.2:
-                    elevation_grid = elev_data['elevation_grid']
-
-                    # Resize to match current grid_size if needed
-                    if elevation_grid.shape != self.grid_size:
-                        from scipy.ndimage import zoom
-                        scale_y = self.grid_size[0] / elevation_grid.shape[0]
-                        scale_x = self.grid_size[1] / elevation_grid.shape[1]
-                        elevation_grid = zoom(elevation_grid, (scale_y, scale_x), order=1)
-
-                    print(f"  ✅ Real elevation data loaded (min: {elevation_grid.min():.1f}m, max: {elevation_grid.max():.1f}m)")
-                    return elevation_grid.astype(np.float32)
-                else:
-                    print(f"  ⚠️  Elevation data location mismatch, generating new terrain...")
-            except Exception as e:
-                print(f"  ⚠️  Could not load elevation data ({e}), using fallback...")
+        # Try live SRTM fetch first
+        try:
+            connector = SRTMConnector()
+            elevation_grid = connector.fetch_elevation_grid(
+                lat=self.center[0],
+                lon=self.center[1],
+                radius=self.radius,
+                grid_shape=self.grid_size,
+            )
+            if elevation_grid is not None:
+                return elevation_grid
+        except Exception as exc:
+            print(f"  [SRTM] Fetch failed ({exc}), falling back to Perlin terrain.")
 
         # Fallback: Generate Perlin Noise terrain
-        print("  🎲 Generating Perlin Noise terrain (fallback)...")
+        print("  Generating Perlin Noise terrain (SRTM unavailable)...")
         elevation = np.zeros(self.grid_size, dtype=np.float32)
 
         for y in range(self.grid_size[0]):

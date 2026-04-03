@@ -231,10 +231,12 @@ class PPOAgent:
         Greedy action with BDI safety masking: invalid actions set to -inf
         before argmax so PPO cannot select BDI-unsafe actions.
 
-        Sardina, S. & Thangarajah, J. (2011). "On the deployment of BDI agents
-        in the presence of learning algorithms." Proc. 22nd IJCAI, pp. 1810-1815.
-        Action masking is the standard mechanism for enforcing hard constraints
-        (safety rules) on RL-selected actions in hybrid BDI+RL architectures.
+        Singh, D., Sardina, S., Padgham, L., & James, G. (2011). "Integrating
+        Learning into a BDI Agent for Environments with Changing Dynamics."
+        Proc. 22nd International Joint Conference on Artificial Intelligence
+        (IJCAI 2011), pp. 2525-2530. DOI: 10.5591/978-1-57735-516-8/IJCAI11-420.
+        Action masking enforces hard BDI constraints on RL-selected actions so
+        the policy optimises over the feasible sub-space only.
         """
         x = torch.FloatTensor(obs).unsqueeze(0).to(self.device)
         logits = self.actor.net(x).squeeze(0)           # raw logits (pre-softmax)

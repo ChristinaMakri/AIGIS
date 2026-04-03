@@ -243,10 +243,11 @@ class FirefighterAgent(Agent):
         Return indices of actions that are safe under BDI safety rules.
         Masks out physically impossible or BDI-unsafe actions before PPO argmax.
 
-        Sardina, S. & Thangarajah, J. (2011). "On the deployment of BDI agents
-        in the presence of learning algorithms." Proc. 22nd IJCAI, pp. 1810-1815.
+        Singh, D., Sardina, S., Padgham, L., & James, G. (2011). "Integrating
+        Learning into a BDI Agent for Environments with Changing Dynamics."
+        Proc. 22nd IJCAI, pp. 2525-2530. DOI: 10.5591/978-1-57735-516-8/IJCAI11-420.
         Action masking enforces hard BDI constraints on RL-selected actions;
-        the RL policy optimises over the feasible sub-space only.
+        the policy optimises over the feasible sub-space only.
 
         Actions: 0=water_drop, 1=fire_line, 2=backburn, 3=patrol, 4=return_to_base
         """
@@ -272,7 +273,7 @@ class FirefighterAgent(Agent):
         """
         Choose suppression strategy.
         Uses trained PPO policy (Schulman et al. 2017) with BDI action masking
-        (Sardina & Thangarajah 2011) when obs is available; falls back to BDI
+        (Singh et al. 2011) when obs is available; falls back to BDI
         utility function (Rao & Georgeff 1995) pre-training.
         """
         if self._rl_obs is not None:
