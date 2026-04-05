@@ -568,11 +568,20 @@ def run_crossval(
         print(f'ERROR: {training_csv} not found. Run train_models.py first.')
         return pd.DataFrame()
 
+    # Normalise column names: train_models.py outputs target_casualties/target_evacuated
+    if 'target_casualties' in df_train.columns and 'casualties' not in df_train.columns:
+        df_train = df_train.rename(columns={
+            'target_casualties': 'casualties',
+            'target_evacuated':  'evacuated',
+            'target_steps':      'steps',
+        })
+
     # Identify feature and target columns
     feature_cols = [c for c in df_train.columns
                     if c not in ('casualties', 'evacuated', 'steps',
                                  'mortality_rate', 'evacuation_rate',
-                                 'run_id', 'scenario_idx', 'lat', 'lon')]
+                                 'run_id', 'scenario_idx', 'lat', 'lon',
+                                 'train_lat', 'train_lon')]
     if 'casualties' not in df_train.columns:
         print('ERROR: training_dataset.csv missing "casualties" column.')
         return pd.DataFrame()
