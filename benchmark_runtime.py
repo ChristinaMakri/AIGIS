@@ -178,7 +178,7 @@ def benchmark(
     all_scenarios = []
     for loc in TRAINING_LOCATIONS:
         all_scenarios.append({
-            'name':           loc['name'],
+            'name':           loc.get('name', f"{loc['lat']:.3f},{loc['lon']:.3f}"),
             'lat':            loc['lat'],
             'lon':            loc['lon'],
             'radius':         loc['radius'],
