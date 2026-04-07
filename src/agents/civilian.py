@@ -1,6 +1,6 @@
 """
 Civilian Agent - BDI (Belief-Desire-Intention) Architecture
-Implements LWR triangular fundamental diagram + Social Force Model (Herding)
+Implements LWR triangular fundamental diagram + inverse-distance-weighted crowd following (herding)
 Features 3-state cognitive machine: Rational, Confused, Herding
 Panic equation with fire distance and family separation factors
 
@@ -87,7 +87,7 @@ class CivilianAgent(Agent):
     INTENTIONS  (selected by cognitive state)
       rational:   A* evacuation to safety_node (optimal path)
       confused:   slow A* evacuation (degraded speed × CONFUSED_SPEED_FACTOR)
-      herding:    follow nearest crowd via Social Force Model
+      herding:    follow nearest crowd via inverse-distance-weighted crowd following (simplified social force)
       freeze:     panic freeze — do nothing this step
       move_random: random panic movement (herding without leader)
 
@@ -756,8 +756,11 @@ class CivilianAgent(Agent):
 
     def _follow_crowd(self, environment) -> None:
         """
-        Social Force Model: Move in the average direction of nearby agents.
-        This simulates herding behavior - following the crowd even to dead ends.
+        Crowd following: move in the inverse-distance-weighted average direction
+        of nearby agents. Simulates herding behaviour — following the crowd even
+        to dead ends. Inspired by Helbing & Molnar (1995) social force concept
+        but implemented as a simplified inverse-distance-weighted average rather
+        than a full force-field formulation.
         """
         if self.grid_position is None or not self.nearby_agents:
             # Fallback to random movement if no crowd
@@ -765,7 +768,7 @@ class CivilianAgent(Agent):
             return
 
         # Calculate inverse-distance-weighted average movement direction.
-        # Agents closer to self have stronger influence (realistic social force model).
+        # Agents closer to self have stronger influence (inverse-distance weighting).
         avg_direction = np.zeros(2, dtype=np.float32)
         total_weight = 0.0
         my_row, my_col = self.grid_position

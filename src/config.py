@@ -112,7 +112,8 @@ FIRE_TEMP_AMBIENT = 20.0  # °C - Ambient temperature (baseline)
 # Behavior. USDA Forest Service General Technical Report INT-122.
 # Intermountain Forest and Range Experiment Station, Ogden, UT.
 #
-# 13 standard NFFL fuel model classifications used below.
+# 11 fuel model classifications used below (models 0-10):
+# Model 0: No Fuel (custom); Models 1-10: subset of NFFL Anderson (1982) classes.
 
 # Fuel Model Definitions
 # Based on Anderson's 13 Fire Behavior Fuel Models
