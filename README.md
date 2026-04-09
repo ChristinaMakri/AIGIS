@@ -266,9 +266,6 @@ AIGIS/
 ├── docker-compose.yml
 ├── docker-run.sh
 │
-├── thesis_figures/                      # Static assets (dashboard snapshots etc.)
-│   └── fig3_1_dashboard_snapshot.png
-│
 ├── tests/
 │   ├── test_fuzzy.py
 │   └── test_movement.py
