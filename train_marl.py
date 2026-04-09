@@ -190,7 +190,8 @@ def run_episode(
             cmd_agent._rl_obs = obs_cmd
 
         # ── Step simulation ─────────────────────────────────────────────
-        done = bool(sim.run_step())
+        with _quiet():
+            done = bool(sim.run_step())
 
         # ── Compute step rewards ────────────────────────────────────────
         cur_burning   = int(np.sum(env.fire_grid == 1))
@@ -307,7 +308,7 @@ def train(
     print('AIGIS — MARL Training  (Independent PPO + CTDE Critic)')
     print('=' * 70)
     print('Schulman et al. (2017) PPO  |  Lowe et al. (2017) CTDE')
-    print('Bengio et al. (2009) Curriculum  |  12 training scenarios (3 phases)')
+    print('Bengio et al. (2009) Curriculum  |  23 training scenarios (3 phases)')
     print(f'Total episodes: {total_episodes}  |  Steps/episode: {training_steps}')
     print(f'Device: {device}  |  Output: {output_dir}')
     if start_episode > 0:

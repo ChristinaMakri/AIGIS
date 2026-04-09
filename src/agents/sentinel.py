@@ -155,51 +155,45 @@ class SentinelAgent(Agent):
         fire_grid = environment.fire_grid
         temp_grid = environment.temperature_grid
 
-        # Track current detections for debouncing
-        current_detections = set()
+        # ── Vectorised scan (replaces Python per-cell loop) ─────────────────
+        # Build offset arrays for the bounding box and apply circular mask.
+        R   = self.detection_radius
+        H, W = fire_grid.shape
+        r0, r1 = max(0, row - R), min(H, row + R + 1)
+        c0, c1 = max(0, col - R), min(W, col + R + 1)
 
-        # SPATIAL OPTIMIZATION: Bounding Box + Circular Check
-        # Only scan within detection_radius (not the entire grid)
-        # This reduces complexity from O(N^2) to O(R^2) where R << N
-        for dr in range(-self.detection_radius, self.detection_radius + 1):
-            for dc in range(-self.detection_radius, self.detection_radius + 1):
-                if dr == 0 and dc == 0:
-                    continue
+        dr = np.arange(r0, r1, dtype=np.int32) - row   # shape (rows,)
+        dc = np.arange(c0, c1, dtype=np.int32) - col   # shape (cols,)
+        DR, DC = np.meshgrid(dr, dc, indexing='ij')     # (rows, cols)
 
-                # CIRCULAR BOUNDARY: Skip cells outside circular detection range
-                # Use >= to include cells exactly at the detection radius
-                distance_sq = dr**2 + dc**2
-                if distance_sq > self.detection_radius**2:
-                    continue
+        dist2 = DR.astype(np.float32) ** 2 + DC.astype(np.float32) ** 2
+        in_circle = (dist2 <= R * R) & (dist2 > 0)
 
-                r, c = row + dr, col + dc
+        sub_fire = fire_grid[r0:r1, c0:c1]
+        burning  = (sub_fire == 1) & in_circle
 
-                # Check bounds
-                if 0 <= r < fire_grid.shape[0] and 0 <= c < fire_grid.shape[1]:
-                    # Only process burning cells (skip empty cells immediately)
-                    if fire_grid[r, c] == 1:
-                        # Calculate attenuated signal
-                        I_actual = temp_grid[r, c]  # Actual fire intensity
-                        d = np.sqrt(dr**2 + dc**2)  # Euclidean distance
+        current_detections: set = set()
 
-                        # Calculate angle between wind direction and sensor vector
-                        to_sensor = np.array([dc, dr], dtype=np.float32)
-                        sensor_mag = np.linalg.norm(to_sensor)
-                        if sensor_mag > 0:
-                            to_sensor = to_sensor / sensor_mag
-                            cos_theta = np.dot(self.wind_direction, to_sensor)
-                        else:
-                            cos_theta = 0
+        if burning.any():
+            sub_temp = temp_grid[r0:r1, c0:c1]
+            I_actual = sub_temp.astype(np.float32)
+            d        = np.sqrt(dist2)
 
-                        # Signal Detection Theory equation
-                        signal_attenuation = I_actual / (d**2 + self.epsilon)
-                        wind_factor = 1 + cos_theta
-                        noise = np.random.normal(0, self.sigma)
-                        I_detected = signal_attenuation * wind_factor + noise
+            # Wind cosine: to_sensor = (DC, DR) / d
+            cos_theta = np.where(
+                d > 0,
+                (self.wind_direction[0] * DC + self.wind_direction[1] * DR) / d,
+                0.0,
+            ).astype(np.float32)
 
-                        # Check if signal exceeds threshold
-                        if I_detected > self.threshold:
-                            current_detections.add((r, c))
+            signal    = I_actual / (dist2 + self.epsilon) * (1.0 + cos_theta)
+            noise     = np.random.normal(0.0, self.sigma, signal.shape).astype(np.float32)
+            I_det     = signal + noise
+
+            detected_mask = burning & (I_det > self.threshold)
+            rows_det, cols_det = np.where(detected_mask)
+            for ri, ci in zip(rows_det + r0, cols_det + c0):
+                current_detections.add((int(ri), int(ci)))
 
         # Debouncing protocol: update detection history
         # Remove old detections not in current scan

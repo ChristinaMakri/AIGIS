@@ -590,7 +590,7 @@ TRAINING_LOCATIONS = [
     },
 ]
 
-BG, PANEL, FG = '#1a1a2e', '#16213e', '#e0e0e0'
+BG, PANEL, FG = 'white', '#f5f5f5', '#222222'
 
 
 # ---------------------------------------------------------------------------
@@ -1060,7 +1060,7 @@ def _plot_training(metrics: dict, df: pd.DataFrame, out_path: str) -> None:
             a.set_facecolor(PANEL)
             a.tick_params(colors=FG, labelsize=7)
             for sp in a.spines.values():
-                sp.set_edgecolor('#3a3a5c')
+                sp.set_edgecolor('#cccccc')
 
         if model_key == 'casualty_risk':
             # ── Row 0: ROC curve (stage 1 classifier) ──────────────────────
@@ -1075,11 +1075,11 @@ def _plot_training(metrics: dict, df: pd.DataFrame, out_path: str) -> None:
                          'P(casualties > 0)  |  Mullahy (1986)',
                          color=FG, fontsize=7, fontweight='bold')
             ax.legend(fontsize=7, labelcolor=FG,
-                      facecolor=PANEL, edgecolor='#3a3a5c')
+                      facecolor=PANEL, edgecolor='#cccccc')
             ax.text(0.55, 0.12,
                     f"Train: {m['n_neg']} zeros / {m['n_pos']} positive",
                     transform=ax.transAxes, color=FG, fontsize=6,
-                    bbox=dict(facecolor=PANEL, edgecolor='#3a3a5c', alpha=0.8))
+                    bbox=dict(facecolor=PANEL, edgecolor='#cccccc', alpha=0.8))
 
             # ── Row 1: Stage 2 scatter (non-zero test cases only) ──────────
             nz = m['nz_test']
@@ -1097,7 +1097,7 @@ def _plot_training(metrics: dict, df: pd.DataFrame, out_path: str) -> None:
                          f"n={nz.sum()} non-zero",
                          transform=ax2.transAxes, color=FG, fontsize=7,
                          verticalalignment='top',
-                         bbox=dict(facecolor=PANEL, edgecolor='#3a3a5c', alpha=0.8))
+                         bbox=dict(facecolor=PANEL, edgecolor='#cccccc', alpha=0.8))
             else:
                 ax2.text(0.5, 0.5,
                          'Stage 2\nInsufficient\nnon-zero cases',
@@ -1118,7 +1118,7 @@ def _plot_training(metrics: dict, df: pd.DataFrame, out_path: str) -> None:
                     f"R²={m['test_r2']:.3f}\nMAE={m['test_mae']:.2f}",
                     transform=ax.transAxes, color=FG, fontsize=7,
                     verticalalignment='top',
-                    bbox=dict(facecolor=PANEL, edgecolor='#3a3a5c', alpha=0.8))
+                    bbox=dict(facecolor=PANEL, edgecolor='#cccccc', alpha=0.8))
             ax.set_title(m['label'], color=FG, fontsize=8, fontweight='bold')
             ax.set_xlabel('Predicted', color=FG, fontsize=7)
             ax.set_ylabel('Actual',    color=FG, fontsize=7)

@@ -61,9 +61,11 @@ htmlcov/
 .coverage
 *.pyc
 
+# Figures / diagrams
+*.png
+
 # Sensitivity analysis outputs
 sensitivity_results.csv
-sensitivity_analysis.png
 
 # Claude Code
 .claude/

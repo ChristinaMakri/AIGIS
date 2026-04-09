@@ -352,9 +352,9 @@ def run_incremental_validation(num_runs: int = 50, output_file: str = 'increment
 # ---------------------------------------------------------------------------
 
 def _plot_results(df: pd.DataFrame, out_path: str) -> None:
-    BG    = '#1a1a2e'
-    PANEL = '#16213e'
-    FG    = '#e0e0e0'
+    BG    = 'white'
+    PANEL = '#f5f5f5'
+    FG    = '#222222'
     C_PRE  = '#ff6b6b'
     C_POST = '#06d6a0'
 
@@ -378,7 +378,7 @@ def _plot_results(df: pd.DataFrame, out_path: str) -> None:
         ax.set_facecolor(PANEL)
         ax.tick_params(colors=FG, labelsize=7)
         for sp in ax.spines.values():
-            sp.set_edgecolor('#3a3a5c')
+            sp.set_edgecolor('#cccccc')
 
         ax.plot(x, df[pre_col],  'o--', color=C_PRE,  linewidth=1.5, label='Before retrain', markersize=5)
         ax.plot(x, df[post_col], 'o-',  color=C_POST, linewidth=1.5, label='After retrain',  markersize=5)

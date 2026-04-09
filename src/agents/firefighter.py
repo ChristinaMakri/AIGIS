@@ -498,22 +498,25 @@ class FirefighterAgent(Agent):
         self.target_fire = None
 
     def _execute_backburn(self, environment) -> None:
-        """Controlled burn to remove fuel in fire's path"""
-        # Simplified implementation
-        # In reality, this is a complex and risky operation
+        """Controlled burn to remove fuel in fire's path.
+        Success is probabilistic (backburn_effectiveness) reflecting real-world
+        variability due to wind, terrain, and fuel moisture conditions.
+        """
         if self.target_fire is None:
+            return
+
+        import numpy as np
+        if np.random.random() >= self.backburn_effectiveness:
+            self.target_fire = None
             return
 
         fire_row, fire_col = self.target_fire
 
-        # Burn fuel cells ahead of main fire
-        # This removes fuel and creates a barrier
-        for dr in [-3, -2, -1]:  # Burn cells ahead
+        # Burn fuel cells ahead of main fire to create a barrier
+        for dr in [-3, -2, -1]:
             new_row = fire_row + dr
             if 0 <= new_row < environment.grid_shape[0]:
                 if environment.fire_grid[new_row, fire_col] == 3:
-                    # Controlled burn
                     environment.fire_grid[new_row, fire_col] = 2  # Burnt
-                    print(f"  🔥 {self.agent_id}: Backburn at ({new_row}, {fire_col})")
 
         self.target_fire = None

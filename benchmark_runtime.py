@@ -75,7 +75,7 @@ from train_models import TRAINING_LOCATIONS
 
 warnings.filterwarnings('ignore')
 
-BG, PANEL, FG = '#1a1a2e', '#16213e', '#e0e0e0'
+BG, PANEL, FG = 'white', '#f5f5f5', '#222222'
 
 # ---------------------------------------------------------------------------
 # Held-out scenarios (same parameters as validate_*.py / evaluate_marl.py)

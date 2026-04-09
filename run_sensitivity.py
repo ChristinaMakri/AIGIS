@@ -114,7 +114,7 @@ PROBLEM = {
 
 OUTPUTS = ['mortality_rate', 'evacuation_success_rate', 'steps']
 
-BG, PANEL, FG = '#1a1a2e', '#16213e', '#e0e0e0'
+BG, PANEL, FG = 'white', '#f5f5f5', '#222222'
 
 
 # ---------------------------------------------------------------------------

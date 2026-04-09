@@ -245,8 +245,8 @@ class AmbulanceAgent(Agent):
 
         # Compute path to scene
         try:
-            path_to_scene = nx.shortest_path(
-                environment.graph, self.current_node, scene_node, weight='length'
+            path_to_scene = environment.get_shortest_path(
+                self.current_node, scene_node
             )
         except (nx.NetworkXNoPath, nx.NodeNotFound):
             self._send_refuse(message, "no_path_to_scene")
@@ -303,8 +303,8 @@ class AmbulanceAgent(Agent):
             return
 
         try:
-            self.current_path = nx.shortest_path(
-                env.graph, self.current_node, target, weight='length'
+            self.current_path = env.get_shortest_path(
+                self.current_node, target
             )
             # Remove current node (already there)
             if self.current_path and self.current_path[0] == self.current_node:

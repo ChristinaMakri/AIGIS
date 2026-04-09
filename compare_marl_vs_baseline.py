@@ -68,7 +68,7 @@ import matplotlib.gridspec as gridspec
 
 warnings.filterwarnings('ignore')
 
-BG, PANEL, FG = '#1a1a2e', '#16213e', '#e0e0e0'
+BG, PANEL, FG = 'white', '#f5f5f5', '#222222'
 
 # ---------------------------------------------------------------------------
 # Bonferroni-corrected alpha

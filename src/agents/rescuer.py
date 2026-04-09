@@ -241,7 +241,7 @@ class RescuerAgent(Agent):
             target_node = environment.get_nearest_node(target_lat, target_lon)
 
             # Calculate path using A* (single traversal)
-            path = nx.shortest_path(environment.graph, self.current_node, target_node, weight='length')
+            path = environment.get_shortest_path(self.current_node, target_node)
 
             # Calculate path length from the computed path (avoid redundant traversal)
             path_length = sum(
@@ -343,7 +343,7 @@ class RescuerAgent(Agent):
                 self.current_node = environment.get_nearest_node(self.position[0], self.position[1])
 
             self.target_node = environment.get_nearest_node(target_lat, target_lon)
-            self.current_path = nx.shortest_path(environment.graph, self.current_node, self.target_node, weight='length')
+            self.current_path = environment.get_shortest_path(self.current_node, self.target_node)
 
             self.current_mission = {
                 'mission_id': mission_id,
@@ -430,11 +430,9 @@ class RescuerAgent(Agent):
             if should_recalc_periodic and self.target_node:
                 self.steps_since_recalc = 0  # Reset counter
                 try:
-                    self.current_path = nx.shortest_path(
-                        environment.graph,
+                    self.current_path = environment.get_shortest_path(
                         self.current_node,
                         self.target_node,
-                        weight='length'
                     )
                 except (nx.NetworkXNoPath, nx.NodeNotFound):
                     pass  # Keep current path if recalculation fails
@@ -452,11 +450,9 @@ class RescuerAgent(Agent):
                 if environment.fire_grid[next_r, next_c] == 1:  # BURNING
                     try:
                         # Recalculate path avoiding fire
-                        self.current_path = nx.shortest_path(
-                            environment.graph,
+                        self.current_path = environment.get_shortest_path(
                             self.current_node,
                             self.target_node,
-                            weight='length'
                         )
                         return  # Skip movement this step, recalculate next step
                     except (nx.NetworkXNoPath, nx.NodeNotFound):

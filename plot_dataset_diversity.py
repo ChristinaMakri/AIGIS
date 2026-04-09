@@ -111,10 +111,10 @@ HELD_OUT = [
 # ---------------------------------------------------------------------------
 # Colour scheme
 # ---------------------------------------------------------------------------
-BG    = '#1a1a2e'
-PANEL = '#16213e'
-FG    = '#e0e0e0'
-GRID  = '#2a2a4e'
+BG    = 'white'
+PANEL = '#f5f5f5'
+FG    = '#222222'
+GRID  = '#dddddd'
 
 PHASE_COLOURS = {1: '#4cc9f0', 2: '#f77f00', 3: '#e63946'}
 HELD_COLOUR   = '#f4a261'
@@ -290,19 +290,19 @@ def plot_diversity(output_file: str = 'dataset_diversity.png') -> None:
     legend_elements = [
         Line2D([0],[0], marker=TRAIN_MARKER, color='none',
                markerfacecolor=PHASE_COLOURS[1], markersize=9,
-               markeredgecolor='white', markeredgewidth=0.5,
+               markeredgecolor='#444444', markeredgewidth=0.5,
                label='Training Phase 1 — Easy (3 scenarios)'),
         Line2D([0],[0], marker=TRAIN_MARKER, color='none',
                markerfacecolor=PHASE_COLOURS[2], markersize=9,
-               markeredgecolor='white', markeredgewidth=0.5,
+               markeredgecolor='#444444', markeredgewidth=0.5,
                label='Training Phase 2 — Medium (5 scenarios)'),
         Line2D([0],[0], marker=TRAIN_MARKER, color='none',
                markerfacecolor=PHASE_COLOURS[3], markersize=9,
-               markeredgecolor='white', markeredgewidth=0.5,
+               markeredgecolor='#444444', markeredgewidth=0.5,
                label='Training Phase 3 — Hard (7 scenarios)'),
         Line2D([0],[0], marker=HELD_MARKER, color='none',
                markerfacecolor=HELD_COLOUR, markersize=9,
-               markeredgecolor='white', markeredgewidth=0.7,
+               markeredgecolor='#444444', markeredgewidth=0.7,
                label='Held-Out OOD (9 scenarios — never seen in training)'),
     ]
     leg = ax_map.legend(handles=legend_elements, loc='lower left',

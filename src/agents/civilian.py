@@ -848,11 +848,9 @@ class CivilianAgent(Agent):
                     self.steps_since_recalc = 0  # Reset counter
 
                 try:
-                    self.current_path = nx.shortest_path(
-                        environment.graph,
+                    self.current_path = environment.get_shortest_path(
                         self.current_node,
                         self.safety_node,
-                        weight='length'
                     )
                     self._path_fail_count = 0  # Successful path — reset counter
                 except (nx.NetworkXNoPath, nx.NodeNotFound):
@@ -881,11 +879,9 @@ class CivilianAgent(Agent):
                     self.current_path = []  # Clear stale path
                     try:
                         # Find new path avoiding fire
-                        self.current_path = nx.shortest_path(
-                            environment.graph,
+                        self.current_path = environment.get_shortest_path(
                             self.current_node,
                             self.safety_node,
-                            weight='length'
                         )
                     except (nx.NetworkXNoPath, nx.NodeNotFound):
                         self._path_fail_count += 1

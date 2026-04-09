@@ -118,6 +118,12 @@ class Environment:
         # Tracking
         self.step_count = 0
 
+        # ---- Path cache (reverse-Dijkstra precomputation) -----------------
+        # Populated lazily on first request for each target node.
+        # Maps target_node -> {source_node: [source, ..., target]}
+        # One reverse-Dijkstra pass per target replaces O(N) per-civilian calls.
+        self._path_cache: dict = {}
+
         # Road exits = perimeter boundary nodes only (bottlenecks for ECT calculation)
         # Internal safe zones (parks, beaches) are gathering points, not road exits
         self.num_exits = num_road_exits if num_road_exits > 0 else max(1, len(safe_nodes) // 20)
@@ -153,41 +159,151 @@ class Environment:
     def find_nearest_safe_node(self, from_node: int) -> int:
         """
         Find the nearest safe node from the given node.
-        Uses Dijkstra's shortest path to find closest safe zone.
+        One single-source Dijkstra pass from from_node; pick the safe_node
+        with the smallest distance.  This replaces the previous loop that
+        issued one shortest_path_length call per safe_node (O(189) Dijkstra
+        calls per civilian → 11,340 calls on step 1 for 60 civilians).
         """
         if not self.safe_nodes:
-            # Fallback: return any node at map edge
             return self._get_perimeter_node()
 
-        # If already at safe node, return it
         if from_node in self.safe_nodes:
             return from_node
 
-        # Find shortest path lengths to all safe nodes
-        min_distance = float('inf')
-        nearest_safe = None
+        try:
+            lengths = nx.single_source_dijkstra_path_length(
+                self.graph, from_node, weight='length'
+            )
+            nearest_safe = min(
+                (n for n in self.safe_nodes if n in lengths),
+                key=lambda n: lengths[n],
+                default=None,
+            )
+            if nearest_safe is not None:
+                return nearest_safe
+        except (nx.NetworkXNoPath, nx.NodeNotFound, Exception):
+            pass
 
-        for safe_node in self.safe_nodes:
+        try:
+            return self._get_perimeter_node()
+        except Exception:
+            return from_node
+
+    def _build_node_grid_map(self) -> None:
+        """
+        Precompute arrays mapping every road-network node to its grid cell.
+        Called once lazily; stored as numpy arrays for fast vectorised
+        fire-blocking checks.
+        """
+        nodes = list(self.graph.nodes())
+        rows, cols = [], []
+        for n in nodes:
+            d = self.graph.nodes[n]
+            r, c = self.latlon_to_grid(d['y'], d['x'])
+            rows.append(r)
+            cols.append(c)
+        self._node_arr        = np.array(nodes, dtype=np.int64)
+        self._node_rows       = np.array(rows,  dtype=np.int32)
+        self._node_cols       = np.array(cols,  dtype=np.int32)
+        self._graph_version   = 0
+        self._last_burn_count = -1
+        self._blocked_nodes   = frozenset()
+
+    def _refresh_blocked_nodes(self) -> frozenset:
+        """
+        Return the set of road-network nodes that sit on burning or burnt
+        grid cells.  Rebuilds only when the total burnt-cell count changes,
+        keeping per-step overhead to a single vectorised numpy sum.
+        Increments _graph_version and clears _path_cache when the blocked
+        set changes so stale cached paths are never used.
+        """
+        if not hasattr(self, '_node_arr'):
+            self._build_node_grid_map()
+
+        burn_count = int(np.sum(self.fire_grid > 0))
+        if burn_count == self._last_burn_count:
+            return self._blocked_nodes
+
+        burning     = (self.fire_grid == 1) | (self.fire_grid == 2)
+        mask        = burning[self._node_rows, self._node_cols]
+        new_blocked = frozenset(self._node_arr[mask].tolist())
+
+        if new_blocked != self._blocked_nodes:
+            self._blocked_nodes  = new_blocked
+            self._graph_version += 1
+            if hasattr(self, '_path_cache'):
+                self._path_cache.clear()
+
+        self._last_burn_count = burn_count
+        return self._blocked_nodes
+
+    def get_shortest_path(self, source: int, target: int, weight: str = 'length') -> list:
+        """
+        Return the shortest path from source to target on the passable road
+        network, excluding nodes whose grid cell is currently burning or burnt.
+
+        Two strategies are used depending on the target:
+
+        Safe-zone targets (civilians all share a small number of targets):
+            A versioned reverse-Dijkstra cache precomputes all sources to the
+            target in one pass.  The cache entry is keyed by (target, version)
+            and is invalidated automatically whenever fire blocks new road nodes.
+            Between fire-spread events all lookups are O(1).
+
+        Dynamic targets (rescuers, ambulances -- target changes per mission):
+            A single forward Dijkstra on the passable graph.  The passable
+            graph view is rebuilt only when the blocked-node set changes.
+
+        Raises nx.NetworkXNoPath / nx.NodeNotFound when no passable path
+        exists, consistent with the contract of nx.shortest_path.
+        """
+        if not hasattr(self, '_path_cache'):
+            self._path_cache = {}
+
+        blocked = self._refresh_blocked_nodes()
+        G       = nx.restricted_view(self.graph, blocked, []) if blocked else self.graph
+
+        # Reverse-Dijkstra cache: only worthwhile when many agents share the
+        # same target -- i.e. established safe zones.
+        if target in self.safe_nodes:
+            version   = getattr(self, '_graph_version', 0)
+            cache_key = (target, version)
+
+            if cache_key not in self._path_cache:
+                try:
+                    G_rev     = G.reverse(copy=False)
+                    paths_rev = nx.single_source_dijkstra_path(G_rev, target, weight=weight)
+                    # paths_rev[n] = [target, ..., n] on reversed graph;
+                    # reverse each to get [n, ..., target] on original graph
+                    self._path_cache[cache_key] = {
+                        n: list(reversed(p)) for n, p in paths_rev.items()
+                    }
+                except Exception:
+                    self._path_cache[cache_key] = {}
+
+            cached = self._path_cache.get(cache_key, {})
+            if source in cached:
+                return cached[source]
+
+        # Dynamic target: cache a full single-source Dijkstra from source so
+        # that CNP bidding bursts (one rescuer computing paths to 60 civilians)
+        # only run Dijkstra once per source per graph version.
+        version  = getattr(self, '_graph_version', 0)
+        fwd_key  = ('fwd', source, version)
+        if fwd_key not in self._path_cache:
             try:
-                path_length = nx.shortest_path_length(
-                    self.graph, from_node, safe_node, weight='length'
+                self._path_cache[fwd_key] = nx.single_source_dijkstra_path(
+                    G, source, weight=weight
                 )
-                if path_length < min_distance:
-                    min_distance = path_length
-                    nearest_safe = safe_node
-            except (nx.NetworkXNoPath, nx.NodeNotFound):
-                continue
-
-        # Fallback if no path found to any safe node
-        if nearest_safe is None:
-            # Try perimeter node as last resort (edges of map are considered safe)
-            try:
-                nearest_safe = self._get_perimeter_node()
             except Exception:
-                # Ultimate fallback: stay at current location
-                nearest_safe = from_node
+                self._path_cache[fwd_key] = {}
 
-        return nearest_safe
+        fwd = self._path_cache.get(fwd_key, {})
+        if target in fwd:
+            return fwd[target]
+
+        # Final fallback (target unreachable in cached run — shouldn't happen)
+        return nx.shortest_path(G, source, target, weight=weight)
 
     def _get_perimeter_node(self) -> int:
         """
