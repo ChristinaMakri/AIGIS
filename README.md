@@ -189,16 +189,24 @@ python main.py --batch 20 --dashboard --output results.csv
 ### Train ML Models
 
 ```bash
-python train_models.py            # XGBoost risk predictor (100 MC runs)
+python train_models.py            # XGBoost risk predictor (2000 MC runs)
 python main.py                    # Uses trained models automatically
 ```
 
 ### Train + Evaluate Hybrid MARL
 
 ```bash
-python train_marl.py --episodes 4000 --steps 500 --phase1-end 800 --phase2-end 2400 --output models/rl   # PPO curriculum training
-python evaluate_marl.py --runs 30       # 95% CI across training + held-out scenarios
+python train_marl.py --episodes 4000 --steps 500 --phase1-end 800 --phase2-end 2400 --output models/rl
+python evaluate_marl.py --runs 50       # 95% CI across training + held-out scenarios
 ```
+
+### Full Thesis Experiment Pipeline
+
+```bash
+bash run_thesis_experiments.sh    # All 19 steps (~14 hours CPU-only)
+```
+
+Steps 0–18 cover: dataset diversity, ML training + cross-validation, physics validation against 9 real incidents, Sobol sensitivity analysis, ablation study, MARL training + evaluation, MARL vs baseline comparison, and runtime benchmark.
 
 ---
 
@@ -206,57 +214,100 @@ python evaluate_marl.py --runs 30       # 95% CI across training + held-out scen
 
 ```
 AIGIS/
-├── main.py                        # CLI entry point
-├── train_models.py                # Train XGBoost risk predictor (MC batch)
-├── train_marl.py                  # Train hybrid PPO agents (curriculum MARL)
-├── evaluate_ml_models.py          # Evaluate ML predictor accuracy
-├── evaluate_marl.py               # Evaluate trained MARL agents (95% CI)
-├── validate_mati.py               # Validate against Mati 2018 fire
-├── validate_campfire.py           # Validate against Camp Fire 2018
-├── validate_all_incidents.py      # Diagnostic comparison: all 32 incidents (23 training + 9 held-out)
-├── run_sensitivity.py             # One-at-a-time sensitivity analysis
-├── run_ablation.py                # Ablation study (CNP, panic, RL flags)
-├── run_thesis_experiments.sh      # Full thesis pipeline (18 steps: 0–17)
+├── main.py                              # CLI entry point
+│
+├── # --- Training ---
+├── train_models.py                      # Train XGBoost risk predictor (MC batch)
+├── train_marl.py                        # Train hybrid PPO agents (curriculum MARL)
+│
+├── # --- Evaluation ---
+├── evaluate_ml_models.py                # Evaluate ML predictor (in-dist + 5-fold CV)
+├── evaluate_marl.py                     # Evaluate trained MARL agents (95% CI, 32 scenarios)
+│
+├── # --- Physics validation (held-out real incidents) ---
+├── validate_mati.py                     # Mati 2018, Greece (Lagouvardos et al. 2019)
+├── validate_campfire.py                 # Camp Fire 2018, USA (CAL FIRE 2020)
+├── validate_pedrogao.py                 # Pedrogão Grande 2017, Portugal (Viegas et al. 2017)
+├── validate_alexandroupoli.py           # Alexandroupoli 2023, Greece (EMSR689)
+├── validate_lahaina.py                  # Lahaina 2023, USA (NFPA 2024)
+├── validate_black_saturday.py           # Black Saturday 2009, Australia (Teague 2010)
+├── validate_tubbs.py                    # Tubbs Fire 2017, USA (CAL FIRE 2018)
+├── validate_peloponnese.py              # Peloponnese 2007, Greece (Koutsias et al. 2012)
+├── validate_valparaiso.py               # Valparaíso 2014, Chile (Encinas et al. 2015)
+├── validate_all_incidents.py            # All 32 incidents combined (20 runs each)
+├── run_incremental_validation.py        # Leave-one-incident-out incremental validation
+│
+├── # --- Sensitivity, ablation, benchmarks ---
+├── run_sensitivity.py                   # Sobol global sensitivity analysis (Saltelli 2010)
+├── run_ablation.py                      # Ablation study: CNP + panic model contribution
+├── compare_marl_vs_baseline.py          # MARL vs rule-based BDI (Wilcoxon signed-rank)
+├── benchmark_runtime.py                 # Wall-clock runtime benchmark (32 scenarios)
+│
+├── # --- Thesis diagram generators ---
+├── plot_dataset_diversity.py            # Fig 5.1 — 32-scenario dataset diversity chart
+├── plot_scenario_map.py                 # Fig 5.2 — geographic scenario map
+├── plot_civilian_fsm.py                 # Fig 3.2 — civilian FSM state diagram
+├── plot_agent_comms.py                  # Fig 3.3 — agent communication topology
+├── plot_marl_convergence.py             # Fig 6.7 — MARL training convergence curves
+├── plot_dataset_analysis.py             # Exploratory dataset analysis plots
+│
+├── # --- Pipeline ---
+├── run_thesis_experiments.sh            # Full thesis pipeline (steps 0–18)
+├── run_tests.sh                         # Run test suite
+├── run.sh                               # Quick-start wrapper
+│
 ├── requirements.txt
 ├── README.md
-├── PHYSICS_MODELS.md              # Scientific model documentation
-├── ARCHITECTURE.md                # System design and agent logic
-├── ODD_PROTOCOL.md                # Grimm et al. (2020) ODD description
+├── PHYSICS_MODELS.md                    # Scientific model documentation
+├── ARCHITECTURE.md                      # System design and agent logic
+├── ODD_PROTOCOL.md                      # Grimm et al. (2020) ODD protocol
 ├── DOCKER.md
+├── Dockerfile
+├── docker-compose.yml
+├── docker-run.sh
+│
+├── thesis_figures/                      # Static assets (dashboard snapshots etc.)
+│   └── fig3_1_dashboard_snapshot.png
+│
+├── tests/
+│   ├── test_fuzzy.py
+│   └── test_movement.py
+│
 └── src/
-    ├── config.py                  # All parameters in one place
-    ├── message.py                 # FIPA-ACL message class
-    ├── environment.py             # LiveMapBuilder, smoke_grid, SRTM
-    ├── fire_simulation.py         # Rothermel spread + smoke diffusion
-    ├── fire_predictor.py          # Step-ahead XGBoost fire predictor
-    ├── simulation.py              # Main engine, metrics, final report
-    ├── dashboard.py               # 7-panel matplotlib PNG dashboard
-    ├── web_dashboard.py           # Real-time Flask/SSE web dashboard
-    ├── ml_predictor.py            # XGBoost prediction module
-    ├── parameter_adapter.py       # Monte Carlo parameter learning
+    ├── config.py                        # All parameters in one place
+    ├── message.py                       # FIPA-ACL message class
+    ├── environment.py                   # LiveMapBuilder, smoke_grid, SRTM
+    ├── fire_simulation.py               # Rothermel spread + smoke diffusion
+    ├── fire_predictor.py                # Step-ahead XGBoost fire predictor
+    ├── simulation.py                    # Main engine, metrics, final report
+    ├── dashboard.py                     # 7-panel matplotlib PNG dashboard
+    ├── web_dashboard.py                 # Real-time Flask/SSE web dashboard
+    ├── ml_predictor.py                  # XGBoost prediction module
+    ├── parameter_adapter.py             # Monte Carlo parameter learning
     ├── templates/
-    │   └── index.html             # Web dashboard frontend (Plotly.js)
+    │   └── index.html                   # Web dashboard frontend (Plotly.js)
     ├── data_connectors/
-    │   ├── fwi_connector.py       # Open-Meteo FWI data
-    │   ├── firms_connector.py     # NASA FIRMS ignition density
-    │   ├── airquality_connector.py  # OpenAQ PM2.5 / AQI
-    │   └── ems_connector.py       # OSM hospital node lookup
+    │   ├── fwi_connector.py             # Open-Meteo FWI data
+    │   ├── firms_connector.py           # NASA FIRMS ignition density
+    │   ├── airquality_connector.py      # OpenAQ PM2.5 / AQI
+    │   ├── ems_connector.py             # OSM hospital node lookup
+    │   └── srtm_connector.py            # NASA SRTM elevation (~30 m resolution)
     ├── rl/
-    │   ├── ppo.py                 # PPO actor-critic (Schulman et al. 2017)
-    │   ├── observations.py        # Per-role observation builders (24/22/26-dim)
-    │   ├── qmix.py                # QMIX monotonic mixing network (Rashid et al. 2018)
-    │   ├── rewards.py             # Per-role step + terminal reward functions
-    │   └── curriculum.py         # 9-scenario curriculum (Bengio et al. 2009)
+    │   ├── ppo.py                       # PPO actor-critic (Schulman et al. 2017)
+    │   ├── observations.py              # Per-role observation builders
+    │   ├── qmix.py                      # QMIX mixing network (Rashid et al. 2018)
+    │   ├── rewards.py                   # Per-role step + terminal reward functions
+    │   └── curriculum.py               # 23-scenario curriculum (Bengio et al. 2009)
     └── agents/
-        ├── base_agent.py          # Abstract BDI base (perceive/decide/act)
-        ├── sentinel.py            # Reactive — Signal Detection Theory
-        ├── analyst.py             # BDI — Rothermel TTI + phase feedback
-        ├── commander.py           # BDI + PPO — ECT/TTI + CNP Manager
-        ├── risk_monitor.py        # Model-Based — pre-ignition FWI risk
-        ├── firefighter.py         # BDI + Utility + PPO — water/fire-line/backburn
-        ├── rescuer.py             # BDI + PPO — CNP Contractor, A* pathfinding
-        ├── ambulance.py           # BDI — two-phase medical extraction
-        └── civilian.py            # BDI — crowd dynamics, smoke injury
+        ├── base_agent.py                # Abstract BDI base (perceive/decide/act)
+        ├── sentinel.py                  # Reactive — Signal Detection Theory
+        ├── analyst.py                   # BDI — Rothermel TTI + phase feedback
+        ├── commander.py                 # BDI + PPO — ECT/TTI + CNP Manager
+        ├── risk_monitor.py              # Model-Based — pre-ignition FWI risk
+        ├── firefighter.py               # BDI + Utility + PPO — water/fire-line/backburn
+        ├── rescuer.py                   # BDI + PPO — CNP Contractor, A* pathfinding
+        ├── ambulance.py                 # BDI — two-phase medical extraction
+        └── civilian.py                  # BDI — crowd dynamics, smoke injury
 ```
 
 ---
@@ -366,6 +417,7 @@ See [DOCKER.md](DOCKER.md) for details.
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) — Complete agent logic, communication flows, data pipeline
 - [PHYSICS_MODELS.md](PHYSICS_MODELS.md) — All scientific models with equations and references
+- [ODD_PROTOCOL.md](ODD_PROTOCOL.md) — Grimm et al. (2020) ODD protocol description
 - [DOCKER.md](DOCKER.md) — Docker deployment guide
 
 ---
