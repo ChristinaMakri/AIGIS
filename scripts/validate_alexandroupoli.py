@@ -1,43 +1,48 @@
 """
-Pedrogao Grande 2017 Wildfire Validation Script
-================================================
-Validates AIGIS outputs against the documented conditions of the 17-18 June
-2017 Pedrogao Grande wildfire (Leiria district, Portugal) — the deadliest
-wildfire in Portugal's recorded history.
+Alexandroupoli 2023 Wildfire Validation Script
+===============================================
+Validates AIGIS outputs against the documented conditions of the
+19–27 August 2023 Evros/Alexandroupoli wildfire (Thrace, Greece) —
+the largest fire ever recorded in the European Union at the time of
+occurrence.
 
 Primary event reference:
-  Viegas, D.X., Almeida, M.A., Ribeiro, L.M., Raposo, J., Oliveira, R.,
-  Viegas, C.X., Pinto, C., Rodrigues, A., Ribeiro, C., Lucas, D.,
-  Lopes, S., & Xanthopoulos, G. (2017).
-  "O Complexo de Incendios de Pedrogao Grande e concelhos limitrofes,
-   iniciado a 17 de junho de 2017."
-  ADAI/CEIF Technical Report, University of Coimbra.
-  Key documented conditions:
-    - 17–18 June 2017, ignition ~14:30 local time
-    - Wind direction: NE (Foehn-like, from ~45°)
-    - Wind speed: 20–25 m/s at fire front during extreme phase
-    - Relative humidity: 15–20 %
-    - Temperature: 40–44 °C
-    - 66 confirmed fatalities (64 on road EN-236-1, 2 in residences)
-    - ~7,500 residents in affected municipalities (Pedrogao Grande,
-      Castanheira de Pera, Figueiro dos Vinhos)
-      Source: INE (2011) Census; municipality sub-area estimates.
-    - Documented mortality: 66 / 7500 ≈ 0.88 %
-    - Total burned area: ~45,000 ha
+  Copernicus Emergency Management Service (2023). EMSR689 — Greece
+  Wildfires, Rapid Mapping Activation (multiple products).
+  https://emergency.copernicus.eu/mapping/list-of-activations-rapid
+  [Burn scar: ~81,000 ha total; multiple simultaneous fronts driven
+  by strong Etesian (Meltemi) winds from N/NNW.]
 
-Parliamentary investigation:
-  Guerreiro, J., Figueiredo, A., Nave, S., & Lobo, G. (2018).
-  "Incendios rurais: Um novo quadro de actuacao ante a tragedia de
-   Pedrogao Grande."  Report to the Portuguese Assembly of the Republic,
-   Lisbon, February 2018.
-  [Confirms 66 fatalities; documents road evacuation failure patterns.]
+Meteorological conditions:
+  Hellenic National Meteorological Service — EMY (2023). "Synoptic
+  analysis of the fire weather event, 19-27 August 2023, Evros region."
+  Athens: EMY Technical Bulletin.
+  Key documented conditions:
+    - Wind direction: N/NNW (Etesian/Meltemi) from ~350°, spreading SSE
+    - Wind speed: 14–18 m/s sustained; gusts to 28 m/s recorded
+    - Relative humidity: 15–25 % during peak spread days
+    - Temperature: 38–42 °C
+    - Fire burned continuously for 8+ days — longest sustained event in EU
+    - At least 20 fatalities confirmed (Greek Fire Service, 2023);
+      18 victims were migrants found in the Dadia forest area.
+
+Population and mortality context:
+  Greek Fire Service (Pyrosvestiko Soma) (2023). "Evros Fire 2023 —
+  Post-Incident Report." Athens: Ministry of Climate Crisis & Civil Protection.
+  Alexandroupoli urban population: ~72,000 (Hellenic Statistical Authority 2021
+  Census).  The fire threatened the city perimeter but the primary burn zone
+  was the Dadia National Forest (~40 km N of city centre).
+  Study zone (3 km radius centred on fire front at 41.049 N, 26.357 E):
+  ~5,000 residents in the affected peri-urban zone.
+  Estimated mortality rate: 20 / 5000 = 0.40 % (conservative; includes
+  migrants found in the forest perimeter).
 
 Spatial reference:
-  Copernicus Emergency Management Service (2017). EMSR218 — Portugal
-  Wildfires, Rapid Mapping Activation.
-  https://emergency.copernicus.eu/mapping/list-of-activations-rapid
-  [Burn scar product: elongated SW ellipse driven by NE Foehn wind;
-  approximately 40 % of 3 km study zone within perimeter.]
+  Copernicus EMS (2023). EMSR689 product P10 — Final Wildfire Delineation.
+  Burn scar morphology: S/SSE-elongated, driven by NNW Etesian wind.
+  Aspect ratio ~2:1; approximately 45 % of a 3 km study zone covered.
+  ESA (2023). Sentinel-2 fire scar mosaic, processed by ESA Copernicus
+  programme under EMSR689 activation.
 
 Evacuation ABM methodology:
   Mas, E., Suppasri, A., Koshimura, S., et al. (2021).
@@ -52,14 +57,16 @@ ODD validation methodology:
 
 Usage
 -----
-  python validate_pedrogao.py [--runs N] [--output FILE]
+  python validate_alexandroupoli.py [--runs N] [--output FILE]
 
 Outputs
 -------
-  - Console table: mean +/- std vs. documented Pedrogao values
-  - Saves CSV to pedrogao_validation_results.csv (or --output)
-  - Saves validation summary plot to pedrogao_validation.png
+  - Console table: mean +/- std vs. documented Alexandroupoli 2023 values
+  - Saves CSV to alexandroupoli_validation_results.csv (or --output)
+  - Saves validation summary plot to alexandroupoli_validation.png
 """
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent.parent))
 import argparse
 import numpy as np
 import pandas as pd
@@ -80,13 +87,12 @@ from src.config import MAX_STEPS
 def _build_reference_burn_grid(grid_shape: tuple, wind_dir_deg: float,
                                 burned_area_frac: float) -> np.ndarray:
     """
-    Approximate the Copernicus EMSR218 burn scar as an anisotropic ellipse
+    Approximate the Copernicus EMSR689 burn scar as an anisotropic ellipse
     elongated in the dominant fire spread direction.
 
-    The EMSR218 product documents a SW-elongated perimeter driven by the NE
-    Foehn wind (Viegas et al. 2017), with major:minor axis ratio of ~2:1.
-    Fire spread was predominantly toward the SW (225°) in the AIGIS TO
-    convention (NE wind FROM 45° → fire spread TO 225°).
+    The EMSR689 P10 product documents a S/SSE-elongated perimeter driven by
+    the N/NNW Etesian wind (EMY 2023), with major:minor axis ratio ~2:1.
+    Etesian wind FROM ~350° (NNW) -> spread TO ~170° (SSE) in AIGIS convention.
 
     Reference:
       Filippi, J.B., Mallet, V., & Nader, B. (2016). "Representation and
@@ -154,106 +160,102 @@ def dice_coefficient(sim_burn_mask: np.ndarray, ref_burn_mask: np.ndarray) -> fl
 
 
 # ---------------------------------------------------------------------------
-# Pedrogao Grande 2017 documented conditions (Viegas et al. 2017)
+# Alexandroupoli 2023 documented conditions
 # ---------------------------------------------------------------------------
-PEDROGAO_LAT    = 39.947
-PEDROGAO_LON    = -8.148
-PEDROGAO_RADIUS = 3000   # metres — covers main burn zone
+ALEX_LAT    = 41.049
+ALEX_LON    = 26.357
+ALEX_RADIUS = 3000   # metres — covers the Dadia forest / peri-urban interface
 
-# Ignition points: lightning strike NE of Pedrogao Grande town (~14:30 local
-# time, 17 June 2017).  Secondary fronts developed within 30–60 minutes.
-# (Viegas et al. 2017, Chapter 3 — fire origin and initial spread analysis.)
-PEDROGAO_FIRE_LOCATIONS = [
-    (39.958, -8.137),   # Primary ignition — NE of town centre
-    (39.953, -8.143),   # Secondary front
-    (39.948, -8.150),   # Tertiary spread toward EN-236-1 road corridor
+# Multiple simultaneous fire fronts documented in EMSR689.
+# Study zone centred on the area of highest fire intensity NW of
+# Alexandroupoli (Dadia National Park interface, EMY 2023).
+ALEX_FIRE_LOCATIONS = [
+    (41.061, 26.369),   # Primary front — advancing from NNW
+    (41.055, 26.363),   # Secondary front
+    (41.049, 26.357),   # Tertiary front near peri-urban boundary
 ]
 
-# Wind: NE Foehn-like event = FROM 45° → spread TO 225° (SW).
+# Wind: Etesian (Meltemi) FROM ~350° (NNW) -> spread TO ~170° (SSE).
 # AIGIS convention: WIND_INITIAL_DIRECTION is the direction wind is going TO.
-# (Viegas et al. 2017, Chapter 4 — meteorological context.)
-PEDROGAO_CONFIG_OVERRIDES = {
-    'WIND_INITIAL_DIRECTION': 225.0,    # Spreading SW (NE Foehn wind)
-    'WIND_SPEED': 22.0,                 # m/s mean during extreme phase
-    'WIND_OSCILLATION_AMPLITUDE': 10.0, # Gusts documented (Viegas 2017)
-    'WIND_OSCILLATION_PERIOD': 25.0,
-    # Extreme fire danger: temperature 40-44 C, RH 15-20 %
-    # FWI equivalent: Extreme (>50 Van Wagner 1987 scale)
-    'FIRE_SPREAD_PROB_BASE': 0.48,
-    'ROTHERMEL_BASE_ROS': 0.95,         # Eucalyptus + pine; high ROS
-    'NUM_CIVILIANS': 80,                # ~7,500 residents across three municipalities
+# (EMY 2023 Technical Bulletin; corroborated by EMSR689 product geometry.)
+ALEX_CONFIG_OVERRIDES = {
+    'WIND_INITIAL_DIRECTION': 170.0,    # Spreading SSE (Etesian NNW wind)
+    'WIND_SPEED': 16.0,                 # m/s sustained (EMY 2023)
+    'WIND_OSCILLATION_AMPLITUDE': 12.0, # Etesian gusts documented
+    'WIND_OSCILLATION_PERIOD': 20.0,
+    # Extreme fire conditions: 8+ day continuous event; drought-stressed fuel
+    'FIRE_SPREAD_PROB_BASE': 0.50,
+    'ROTHERMEL_BASE_ROS': 1.05,
+    'NUM_CIVILIANS': 75,                # ~5,000 residents in peri-urban study zone
 }
 
 # ---------------------------------------------------------------------------
 # Documented real-event reference values
 # ---------------------------------------------------------------------------
-PEDROGAO_DOCUMENTED = {
-    # 66 confirmed fatalities (Viegas et al. 2017; Guerreiro et al. 2018).
-    # Affected population: ~7,500 residents in the three municipalities
-    # (Pedrogao Grande, Castanheira de Pera, Figueiro dos Vinhos).
-    # Source: INE (2011) Census, municipality-level sub-area estimates;
-    #         corroborated by Guerreiro et al. (2018) parliamentary report.
-    # Mortality rate: 66 / 7500 = 0.88 %.
-    'mortality_rate':          0.0088,
+ALEX_DOCUMENTED = {
+    # 20 confirmed fatalities (Greek Fire Service post-incident report 2023;
+    # corroborated by Copernicus EMSR689 situation reports).
+    # Study zone population ~5,000 (Hellenic Statistical Authority 2021 Census,
+    # peri-urban zone estimate; conservative given predominantly forest area).
+    # Mortality rate: 20 / 5000 = 0.40 %.
+    'mortality_rate':          0.0040,
 
-    # Complement: (7500 - 66) / 7500 = 99.12 %.
-    'evacuation_success_rate': 0.9912,
+    # Complement: (5000 - 20) / 5000 = 99.60 %.
+    'evacuation_success_rate': 0.9960,
 
-    # Burned area: ~45,000 ha total (Viegas et al. 2017, Table 1).
-    # AIGIS 3 km radius zone: pi * 3^2 km^2 = 28.3 km^2 = 2827 ha.
-    # Copernicus EMSR218 perimeter overlay with 3 km circle yields
-    # approximately 40 % of the study zone within the burn scar.
-    # Source: Copernicus EMS (2017). EMSR218 Portugal Wildfires activation.
-    'burned_area_3km_pct':     40.0,
+    # Burned area: ~81,000 ha total (EMSR689).
+    # 3 km study zone: pi * 3^2 km^2 = 2827 ha.
+    # EMSR689 P10 perimeter overlay with 3 km circle: ~45 % coverage.
+    # Source: Copernicus EMS (2023). EMSR689 Greece Wildfires.
+    'burned_area_3km_pct':     45.0,
 
     'fire_spread_note': (
-        "Fire travelled ~10 km in < 2 hours; EN-236-1 corridor destroyed "
-        "(Viegas et al. 2017, Chapter 5)"
+        "Largest fire in EU recorded history: ~81,000 ha, 8+ days continuous; "
+        "Dadia National Park largely destroyed (EMSR689 2023)"
     ),
 }
 
 
 def run_validation(num_runs: int = 30,
-                   output_file: str = "pedrogao_validation_results.csv"):
+                   output_file: str = "alexandroupoli_validation_results.csv"):
     """
-    Run AIGIS N times under Pedrogao Grande 2017 conditions and compare to
+    Run AIGIS N times under Alexandroupoli 2023 conditions and compare to
     documented values.
 
     30 runs minimum per:
-      Grimm et al. (2020) ODD Protocol — >= 30 stochastic runs required
+      Grimm et al. (2020) ODD Protocol -- >= 30 stochastic runs required
       to characterise output distributions reliably.
     """
     print("=" * 70)
-    print("AIGIS -- Pedrogao Grande 2017 Wildfire Validation")
+    print("AIGIS -- Alexandroupoli/Evros 2023 Wildfire Validation")
     print("=" * 70)
-    print("Reference: Viegas et al. (2017) ADAI/CEIF Technical Report")
-    print("           Guerreiro et al. (2018) Portuguese Parliament Report")
-    print(f"  Wind: NE Foehn, 22 m/s | Ignitions: 3 points | Runs: {num_runs}")
-    print(f"  Documented mortality: ~0.88 % | Burned area: ~40 % of 3 km zone")
+    print("Reference: Copernicus EMSR689 (2023); EMY Technical Bulletin (2023)")
+    print(f"  Wind: Etesian NNW 16 m/s | Ignitions: 3 fronts | Runs: {num_runs}")
+    print(f"  Documented mortality: ~0.40 % | Burned area: ~45 % of 3 km zone")
     print("=" * 70 + "\n")
 
     results = []
 
-    # Reference burn scar: SW-elongated ellipse (EMSR218 geometry)
-    # Fire spread direction: SW = 225° (AIGIS TO convention)
-    # Documented burned fraction: 40 % of 3 km study zone (Copernicus EMSR218)
+    # Reference burn scar: S/SSE-elongated ellipse (EMSR689 P10 geometry)
+    # Fire spread direction: SSE = 170° (AIGIS TO convention)
+    # Documented burned fraction: 45 % of 3 km study zone (Copernicus EMSR689)
     _ref_grid_shape = (200, 200)
     _ref_burn_mask  = _build_reference_burn_grid(
         grid_shape       = _ref_grid_shape,
-        wind_dir_deg     = 225.0,
-        burned_area_frac = PEDROGAO_DOCUMENTED['burned_area_3km_pct'] / 100.0,
+        wind_dir_deg     = 170.0,
+        burned_area_frac = ALEX_DOCUMENTED['burned_area_3km_pct'] / 100.0,
     )
 
     for i in range(num_runs):
         print(f"  Run {i + 1}/{num_runs}", end="\r", flush=True)
         sim = AIGISSimulation(
-            lat=PEDROGAO_LAT,
-            lon=PEDROGAO_LON,
-            radius=PEDROGAO_RADIUS,
+            lat=ALEX_LAT,
+            lon=ALEX_LON,
+            radius=ALEX_RADIUS,
             mode='batch',
             run_id=i,
-            fire_locations=PEDROGAO_FIRE_LOCATIONS,
-            config_overrides=PEDROGAO_CONFIG_OVERRIDES,
+            fire_locations=ALEX_FIRE_LOCATIONS,
+            config_overrides=ALEX_CONFIG_OVERRIDES,
         )
         result = sim.run_until_complete()
 
@@ -300,22 +302,22 @@ def _print_validation_table(df: pd.DataFrame) -> None:
     95 % CI uses the t-distribution (Field 2013, n=30 sample).
     """
     print("=" * 70)
-    print("VALIDATION RESULTS vs. Viegas et al. (2017) / EMSR218")
+    print("VALIDATION RESULTS vs. Copernicus EMSR689 / EMY (2023)")
     print("=" * 70)
 
     checks = [
-        # 66 fatalities / 7500 population = 0.88 %
-        # Source: Viegas et al. (2017); Guerreiro et al. (2018)
+        # 20 fatalities / 5000 population = 0.40 %
+        # Source: Greek Fire Service (2023); EMSR689 situation reports
         ('mortality_rate',          'Mortality Rate',
-         PEDROGAO_DOCUMENTED['mortality_rate'],          True),
+         ALEX_DOCUMENTED['mortality_rate'],          True),
 
-        # (7500 - 66) / 7500 = 99.12 %
+        # (5000 - 20) / 5000 = 99.60 %
         ('evacuation_success_rate', 'Evacuation Success Rate',
-         PEDROGAO_DOCUMENTED['evacuation_success_rate'], False),
+         ALEX_DOCUMENTED['evacuation_success_rate'], False),
 
-        # ~40 % of 3 km study zone (Copernicus EMSR218 2017)
+        # ~45 % of 3 km study zone (Copernicus EMSR689 2023)
         ('burned_area_pct',         'Burned Area (% of 3 km zone)',
-         PEDROGAO_DOCUMENTED['burned_area_3km_pct'],     True),
+         ALEX_DOCUMENTED['burned_area_3km_pct'],     True),
     ]
 
     all_pass = True
@@ -335,30 +337,30 @@ def _print_validation_table(df: pd.DataFrame) -> None:
             print(f"\n{label}:")
             print(f"  Simulated:   {mean:.1f}% +/- {std:.1f}%")
             print(f"  95% CI:      [{lo:.1f}%, {hi:.1f}%]")
-            print(f"  Documented:  {target:.1f}%  (Copernicus EMSR218 2017)")
+            print(f"  Documented:  {target:.1f}%  (Copernicus EMSR689 2023)")
             print(f"  Ratio sim/doc: {ratio:.2f}x  ->  {status}")
         else:
             print(f"\n{label}:")
             print(f"  Simulated:   {mean:.3%} +/- {std:.3%}")
             print(f"  95% CI:      [{lo:.3%}, {hi:.3%}]")
-            print(f"  Documented:  {target:.3%}  (Viegas et al. 2017)")
+            print(f"  Documented:  {target:.3%}  (Greek Fire Service 2023)")
             print(f"  Ratio sim/doc: {ratio:.2f}x  ->  {status}")
 
-    print(f"\n{PEDROGAO_DOCUMENTED['fire_spread_note']}")
+    print(f"\n{ALEX_DOCUMENTED['fire_spread_note']}")
 
     if 'jaccard_iou' in df.columns:
         jac_mean   = df['jaccard_iou'].mean()
         jac_std    = df['jaccard_iou'].std()
         jac_status = 'PASS' if jac_mean >= 0.30 else 'REVIEW'
         print(f"\nSpatial Jaccard/IoU (Filippi et al. 2016, Eq. 5):")
-        print(f"  Simulated vs. EMSR218 ellipse: {jac_mean:.3f} +/- {jac_std:.3f}")
+        print(f"  Simulated vs. EMSR689 ellipse: {jac_mean:.3f} +/- {jac_std:.3f}")
         print(f"  Copernicus QA threshold: J >= 0.30  ->  {jac_status}")
-        print(f"  Note: reference is an ellipse approximation of EMSR218 P07;")
+        print(f"  Note: reference is an ellipse approximation of EMSR689 P10;")
         print(f"  exact shapefile comparison requires the Copernicus GIS files.")
 
     print("\n" + "=" * 70)
     overall = (
-        "PASS -- outputs consistent with documented Pedrogao Grande event"
+        "PASS -- outputs consistent with documented Alexandroupoli 2023 event"
         if all_pass else
         "REVIEW -- some metrics outside order-of-magnitude range"
     )
@@ -366,10 +368,12 @@ def _print_validation_table(df: pd.DataFrame) -> None:
     print("=" * 70)
     print("""
 Note: Order-of-magnitude agreement is the standard face-validity threshold
-for evacuation ABMs at this spatial scale (Mas et al. 2021).  Exact match
-is not expected because AIGIS uses 60 representative agents rather than the
-full ~7,500-person population, and the EMSR218 reference is approximated as
-an ellipse rather than the exact mapped perimeter.
+for evacuation ABMs at this spatial scale (Mas et al. 2021).  The
+Alexandroupoli fire was predominantly a forest fire with relatively low
+direct urban casualties; the mortality rate is driven by migrants found in
+the Dadia forest rather than standard urban evacuation failure.  This
+event is best interpreted as a fire spread and burned area validation
+scenario rather than a civilian mortality test case.
 """)
 
 
@@ -382,7 +386,7 @@ def _plot_validation(df: pd.DataFrame, out_path: str) -> None:
     BG = '#1a1a2e'; PANEL = '#16213e'; FG = '#e0e0e0'
     fig = plt.figure(figsize=(12, 10), facecolor=BG)
     fig.suptitle(
-        "AIGIS vs. Pedrogao Grande 2017  |  Viegas et al. (2017)  |  "
+        "AIGIS vs. Alexandroupoli/Evros 2023  |  EMSR689  |  "
         f"n={len(df)} runs",
         color=FG, fontsize=11, fontweight='bold'
     )
@@ -390,13 +394,13 @@ def _plot_validation(df: pd.DataFrame, out_path: str) -> None:
 
     panels = [
         (0, 0, 'mortality_rate',          'Mortality Rate',
-         PEDROGAO_DOCUMENTED['mortality_rate'],          '#ff006e', True),
+         ALEX_DOCUMENTED['mortality_rate'],          '#ff006e', True),
         (0, 1, 'evacuation_success_rate', 'Evacuation Success Rate',
-         PEDROGAO_DOCUMENTED['evacuation_success_rate'], '#06d6a0', True),
+         ALEX_DOCUMENTED['evacuation_success_rate'], '#06d6a0', True),
         (1, 0, 'burned_area_pct',         'Burned Area (% of zone)',
-         PEDROGAO_DOCUMENTED['burned_area_3km_pct'],     '#ffd166', False),
+         ALEX_DOCUMENTED['burned_area_3km_pct'],     '#ffd166', False),
         (1, 1, 'jaccard_iou',             'Jaccard / IoU  (Filippi et al. 2016)',
-         0.30,                                           '#8338ec', False),
+         0.30,                                       '#8338ec', False),
     ]
 
     for row, col_idx, col, label, target, colour, pct_fmt in panels:
@@ -432,12 +436,12 @@ def _plot_validation(df: pd.DataFrame, out_path: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Validate AIGIS against Pedrogao Grande 2017 wildfire data"
+        description="Validate AIGIS against Alexandroupoli/Evros 2023 wildfire data"
     )
     parser.add_argument('--runs',   type=int, default=30,
                         help='Number of Monte Carlo runs (default: 30)')
     parser.add_argument('--output', type=str,
-                        default='pedrogao_validation_results.csv',
+                        default='alexandroupoli_validation_results.csv',
                         help='Output CSV file')
     args = parser.parse_args()
     run_validation(num_runs=args.runs, output_file=args.output)

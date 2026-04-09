@@ -65,13 +65,13 @@ run_step() {
 # =============================================================================
 
 run_step "0/17 [Pre-run] Dataset Diversity Chart — 32 scenarios (23 training + 9 held-out)" \
-    "python3 plot_dataset_diversity.py --output dataset_diversity.png"
+    "python3 scripts/plot_dataset_diversity.py --output dataset_diversity.png"
 
 run_step "1/17 [Block A] Train ML Models — 2000 Monte Carlo runs, 23 locations" \
-    "python3 train_models.py --runs 2000"
+    "python3 scripts/train_models.py --runs 2000"
 
 run_step "2/17 [Block A] Evaluate ML Models — 10 runs x 23 training scenarios (in-distribution)" \
-    "python3 evaluate_ml_models.py --runs 10 --multi-scenario --output ml_evaluation_results.csv"
+    "python3 scripts/evaluate_ml_models.py --runs 10 --multi-scenario --output ml_evaluation_results.csv"
 
 # Step 2b: 5-fold stratified cross-validation on the hurdle model training set.
 # Why: A single 80/20 holdout gives only one estimate of generalisation error.
@@ -81,7 +81,7 @@ run_step "2/17 [Block A] Evaluate ML Models — 10 runs x 23 training scenarios 
 # Pishahang et al. (2025) Safety and Reliability — held-out event validation of
 # ML-embedded ABM; two-tier reporting (CV + LOIO) matches best practice.
 run_step "2b/17 [Block A] 5-Fold Stratified CV — hurdle model in-distribution stability" \
-    "python3 evaluate_ml_models.py --crossval --training-csv training_dataset.csv --cv-output ml_crossval_results.csv"
+    "python3 scripts/evaluate_ml_models.py --crossval --training-csv training_dataset.csv --cv-output ml_crossval_results.csv"
 
 # =============================================================================
 # BLOCK B — PHYSICS / AGENT VALIDATION AGAINST REAL INCIDENTS (held-out)
@@ -94,54 +94,54 @@ run_step "2b/17 [Block A] 5-Fold Stratified CV — hurdle model in-distribution 
 # =============================================================================
 
 run_step "3/17 [Block B] Validate Mati 2018 — 50 runs [held-out]" \
-    "python3 validate_mati.py --runs 50 --output mati_validation_results.csv"
+    "python3 scripts/validate_mati.py --runs 50 --output mati_validation_results.csv"
 #   Reference : Lagouvardos et al. (2019) BAMS 100(11):2243-2257
 #   Burn scar : Copernicus EMSR249
 #   Target    : mortality ~1.70 %, burned area ~35 % of 3 km zone, Jaccard >= 0.30
 
 run_step "4/17 [Block B] Validate Camp Fire 2018 — 50 runs [held-out]" \
-    "python3 validate_campfire.py --runs 50 --output campfire_validation_results.csv"
+    "python3 scripts/validate_campfire.py --runs 50 --output campfire_validation_results.csv"
 #   Reference : CAL FIRE (2020); NWS Sacramento (2018)
 #   Target    : mortality ~0.31 %, Jaccard >= 0.30
 
 run_step "5/17 [Block B] Validate Pedrogao Grande 2017 — 50 runs [held-out]" \
-    "python3 validate_pedrogao.py --runs 50 --output pedrogao_validation_results.csv"
+    "python3 scripts/validate_pedrogao.py --runs 50 --output pedrogao_validation_results.csv"
 #   Reference : Viegas et al. (2017) ADAI/CEIF; Guerreiro et al. (2018)
 #   Burn scar : Copernicus EMSR218
 #   Target    : mortality ~0.88 %, burned area ~40 % of 3 km zone, Jaccard >= 0.30
 
 run_step "6/17 [Block B] Validate Alexandroupoli 2023 — 50 runs [held-out]" \
-    "python3 validate_alexandroupoli.py --runs 50 --output alexandroupoli_validation_results.csv"
+    "python3 scripts/validate_alexandroupoli.py --runs 50 --output alexandroupoli_validation_results.csv"
 #   Reference : Greek Fire Service (2023); Copernicus EMSR689; EMY (2023)
 #   Burn scar : Copernicus EMSR689 — largest fire in EU recorded history
 #   Target    : mortality ~0.40 %, burned area ~45 % of 3 km zone, Jaccard >= 0.30
 
 run_step "7/17 [Block B] Validate Lahaina 2023 — 50 runs [held-out]" \
-    "python3 validate_lahaina.py --runs 50 --output lahaina_validation_results.csv"
+    "python3 scripts/validate_lahaina.py --runs 50 --output lahaina_validation_results.csv"
 #   Reference : NFPA (2024); Maui County (2024); NOAA (2023); USFA (2024)
 #   Hurricane Dora downburst: ENE wind 27 m/s; 100 fatalities / ~12,800 residents
 #   Target    : mortality ~0.78 %, burned area ~31 % of 3 km zone, Jaccard >= 0.30
 
 run_step "8/17 [Block B] Validate Black Saturday 2009 — 50 runs [held-out]" \
-    "python3 validate_black_saturday.py --runs 50 --output black_saturday_validation_results.csv"
+    "python3 scripts/validate_black_saturday.py --runs 50 --output black_saturday_validation_results.csv"
 #   Reference : Teague et al. (2010) Royal Commission; Cruz et al. (2012)
 #   NW wind 18 m/s; FFDI 190+; 119 fatalities / ~12,000 population = 0.99 %
 #   Target    : mortality ~0.99 %, burned area ~50 % of 3 km zone, Jaccard >= 0.30
 
 run_step "9/17 [Block B] Validate Tubbs Fire 2017 — 50 runs [held-out]" \
-    "python3 validate_tubbs.py --runs 50 --output tubbs_validation_results.csv"
+    "python3 scripts/validate_tubbs.py --runs 50 --output tubbs_validation_results.csv"
 #   Reference : CAL FIRE (2018); Nauslar et al. (2018) Weather and Forecasting
 #   Diablo NE wind 25 m/s; 22 deaths / ~8,000 residents = 0.28 %
 #   Target    : mortality ~0.28 %, burned area ~41 % of 3 km zone, Jaccard >= 0.30
 
 run_step "10/17 [Block B] Validate Peloponnese 2007 — 50 runs [held-out]" \
-    "python3 validate_peloponnese.py --runs 50 --output peloponnese_validation_results.csv"
+    "python3 scripts/validate_peloponnese.py --runs 50 --output peloponnese_validation_results.csv"
 #   Reference : Koutsias et al. (2012) Agric. Forest Meteorol. 156:41-53; EEA (2007)
 #   Etesian NNE wind 14 m/s; 77 deaths total Greece; 0.60 % in Zacharo study zone
 #   Target    : mortality ~0.60 %, burned area ~45 % of 3 km zone, Jaccard >= 0.30
 
 run_step "11/17 [Block B] Validate Valparaiso 2014 — 50 runs [held-out]" \
-    "python3 validate_valparaiso.py --runs 50 --output valparaiso_validation_results.csv"
+    "python3 scripts/validate_valparaiso.py --runs 50 --output valparaiso_validation_results.csv"
 #   Reference : Encinas et al. (2015) Int J Disaster Risk Reduction 13:280-289; CONAF (2014)
 #   SE wind 12 m/s (La Nina drought); 15 deaths / ~8,000 = 0.19 %; South America coverage
 #   Target    : mortality ~0.19 %, burned area ~30 % of 3 km zone, Jaccard >= 0.30
@@ -156,7 +156,7 @@ run_step "12/17 [Block C] Baseline Monte Carlo — 50 runs, default scenario" \
     "python3 main.py --batch 50 --output baseline.csv"
 
 run_step "13/17 [Block C] Multi-Incident Diagnostic — 20 runs x 32 incidents (23 training + 9 held-out)" \
-    "python3 validate_all_incidents.py --runs 20 --output all_incidents_validation.csv"
+    "python3 scripts/validate_all_incidents.py --runs 20 --output all_incidents_validation.csv"
 #   Runs all 32 scenarios at 20 runs each = 640 total runs.
 #   Outputs per-scenario mean +/- 95 % CI for mortality, evacuation, burned area.
 
@@ -171,13 +171,13 @@ run_step "13/17 [Block C] Multi-Incident Diagnostic — 20 runs x 32 incidents (
 # =============================================================================
 
 run_step "14/17 [Block D] Sobol Sensitivity Analysis — N=512 (7168 model runs)" \
-    "python3 run_sensitivity.py --N 512 --output sensitivity_results.csv"
+    "python3 scripts/run_sensitivity.py --N 512 --output sensitivity_results.csv"
 #   N=512 satisfies Saltelli et al. (2010) Section 3.2 recommendation N >= 500/D
 #   for D=6 parameters.  N=128 is exploratory only; N=512 gives publication-quality
 #   95 % CI on total-effect indices STi.
 
 run_step "15/17 [Block D] Ablation Study — 100 runs per condition (4 conditions)" \
-    "python3 run_ablation.py --runs 100 --output ablation_results.csv"
+    "python3 scripts/run_ablation.py --runs 100 --output ablation_results.csv"
 
 # =============================================================================
 # BLOCK E — MARL TRAINING AND FULL EVALUATION
@@ -188,7 +188,7 @@ run_step "15/17 [Block D] Ablation Study — 100 runs per condition (4 condition
 # =============================================================================
 
 run_step "16/17 [Block E] Train MARL — 4,000 episodes x 500 steps, 23-scenario curriculum" \
-    "python3 train_marl.py --episodes 4000 --steps 500 --phase1-end 800 --phase2-end 2400 --output models/rl"
+    "python3 scripts/train_marl.py --episodes 4000 --steps 500 --phase1-end 800 --phase2-end 2400 --output models/rl"
 #   4000 episodes x 500 steps = 2,000,000 total environment steps — same as the
 #   original 10,000 x 200 budget, but episode length now matches evaluation (500 steps).
 #   Phase boundaries scaled proportionally from original (20% / 60% / 40%):
@@ -198,7 +198,7 @@ run_step "16/17 [Block E] Train MARL — 4,000 episodes x 500 steps, 23-scenario
 #   Bengio et al. (2009); PPO clip eps=0.2, GAE lambda=0.95 (Schulman et al. 2016)
 
 run_step "17/17 [Block E] Evaluate MARL — 50 runs x 32 scenarios (23 train + 9 held-out)" \
-    "python3 evaluate_marl.py --runs 50 --output marl_evaluation_results.csv"
+    "python3 scripts/evaluate_marl.py --runs 50 --output marl_evaluation_results.csv"
 #   Held-out: Mati, Camp Fire, Pedrogao, Alexandroupoli, Lahaina, Black Saturday,
 #             Tubbs Fire 2017, Peloponnese 2007, Valparaiso 2014
 #   Metric: mortality rate, evacuation success, burned area % — mean +/- 95 % CI
@@ -212,7 +212,7 @@ run_step "17/17 [Block E] Evaluate MARL — 50 runs x 32 scenarios (23 train + 9
 # Method: Wilcoxon (1945) signed-rank test (paired, non-parametric) per scenario;
 # rank-biserial r effect size (Kerby 2014); Bonferroni alpha = 0.05/32 = 0.00156.
 run_step "17b [Block E] MARL vs Baseline Comparison — Wilcoxon signed-rank, 32 scenarios" \
-    "python3 compare_marl_vs_baseline.py --marl-file marl_evaluation_results.csv --baseline-file all_incidents_validation.csv --output marl_vs_baseline.csv"
+    "python3 scripts/compare_marl_vs_baseline.py --marl-file marl_evaluation_results.csv --baseline-file all_incidents_validation.csv --output marl_vs_baseline.csv"
 
 # Step 18: Wall-clock runtime benchmark across all 32 scenarios.
 # Why: Ronchi & Nilsson (2024) IJDRR systematic review of 134 pedestrian ABM studies
@@ -224,7 +224,7 @@ run_step "17b [Block E] MARL vs Baseline Comparison — Wilcoxon signed-rank, 32
 #   (b) evidence that AIGIS is tractable for the 640-7168 total runs in the pipeline;
 #   (c) a distinguishing feature vs. papers that claim scalability without evidence.
 run_step "18 [Supplement] Runtime Benchmark — 5 timed runs x 32 scenarios" \
-    "python3 benchmark_runtime.py --runs-per-scenario 5 --output benchmark_runtime.csv"
+    "python3 scripts/benchmark_runtime.py --runs-per-scenario 5 --output benchmark_runtime.csv"
 
 # =============================================================================
 # SUMMARY

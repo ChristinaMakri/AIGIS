@@ -189,15 +189,15 @@ python main.py --batch 20 --dashboard --output results.csv
 ### Train ML Models
 
 ```bash
-python train_models.py            # XGBoost risk predictor (2000 MC runs)
-python main.py                    # Uses trained models automatically
+python scripts/train_models.py            # XGBoost risk predictor (2000 MC runs)
+python main.py                            # Uses trained models automatically
 ```
 
 ### Train + Evaluate Hybrid MARL
 
 ```bash
-python train_marl.py --episodes 4000 --steps 500 --phase1-end 800 --phase2-end 2400 --output models/rl
-python evaluate_marl.py --runs 50       # 95% CI across training + held-out scenarios
+python scripts/train_marl.py --episodes 4000 --steps 500 --phase1-end 800 --phase2-end 2400 --output models/rl
+python scripts/evaluate_marl.py --runs 50       # 95% CI across training + held-out scenarios
 ```
 
 ### Full Thesis Experiment Pipeline
@@ -216,45 +216,46 @@ Steps 0–18 cover: dataset diversity, ML training + cross-validation, physics v
 AIGIS/
 ├── main.py                              # CLI entry point
 │
-├── # --- Training ---
-├── train_models.py                      # Train XGBoost risk predictor (MC batch)
-├── train_marl.py                        # Train hybrid PPO agents (curriculum MARL)
-│
-├── # --- Evaluation ---
-├── evaluate_ml_models.py                # Evaluate ML predictor (in-dist + 5-fold CV)
-├── evaluate_marl.py                     # Evaluate trained MARL agents (95% CI, 32 scenarios)
-│
-├── # --- Physics validation (held-out real incidents) ---
-├── validate_mati.py                     # Mati 2018, Greece (Lagouvardos et al. 2019)
-├── validate_campfire.py                 # Camp Fire 2018, USA (CAL FIRE 2020)
-├── validate_pedrogao.py                 # Pedrogão Grande 2017, Portugal (Viegas et al. 2017)
-├── validate_alexandroupoli.py           # Alexandroupoli 2023, Greece (EMSR689)
-├── validate_lahaina.py                  # Lahaina 2023, USA (NFPA 2024)
-├── validate_black_saturday.py           # Black Saturday 2009, Australia (Teague 2010)
-├── validate_tubbs.py                    # Tubbs Fire 2017, USA (CAL FIRE 2018)
-├── validate_peloponnese.py              # Peloponnese 2007, Greece (Koutsias et al. 2012)
-├── validate_valparaiso.py               # Valparaíso 2014, Chile (Encinas et al. 2015)
-├── validate_all_incidents.py            # All 32 incidents combined (20 runs each)
-├── run_incremental_validation.py        # Leave-one-incident-out incremental validation
-│
-├── # --- Sensitivity, ablation, benchmarks ---
-├── run_sensitivity.py                   # Sobol global sensitivity analysis (Saltelli 2010)
-├── run_ablation.py                      # Ablation study: CNP + panic model contribution
-├── compare_marl_vs_baseline.py          # MARL vs rule-based BDI (Wilcoxon signed-rank)
-├── benchmark_runtime.py                 # Wall-clock runtime benchmark (32 scenarios)
-│
-├── # --- Thesis diagram generators ---
-├── plot_dataset_diversity.py            # Fig 5.1 — 32-scenario dataset diversity chart
-├── plot_scenario_map.py                 # Fig 5.2 — geographic scenario map
-├── plot_civilian_fsm.py                 # Fig 3.2 — civilian FSM state diagram
-├── plot_agent_comms.py                  # Fig 3.3 — agent communication topology
-├── plot_marl_convergence.py             # Fig 6.7 — MARL training convergence curves
-├── plot_dataset_analysis.py             # Exploratory dataset analysis plots
-│
 ├── # --- Pipeline ---
 ├── run_thesis_experiments.sh            # Full thesis pipeline (steps 0–18)
 ├── run_tests.sh                         # Run test suite
 ├── run.sh                               # Quick-start wrapper
+│
+└── scripts/                             # All experiment and analysis scripts
+    ├── # Training
+    ├── train_models.py                  # Train XGBoost risk predictor (MC batch)
+    ├── train_marl.py                    # Train hybrid PPO agents (curriculum MARL)
+    │
+    ├── # Evaluation
+    ├── evaluate_ml_models.py            # Evaluate ML predictor (in-dist + 5-fold CV)
+    ├── evaluate_marl.py                 # Evaluate trained MARL agents (95% CI, 32 scenarios)
+    │
+    ├── # Physics validation — held-out real incidents
+    ├── validate_mati.py                 # Mati 2018, Greece (Lagouvardos et al. 2019)
+    ├── validate_campfire.py             # Camp Fire 2018, USA (CAL FIRE 2020)
+    ├── validate_pedrogao.py             # Pedrogão Grande 2017, Portugal (Viegas et al. 2017)
+    ├── validate_alexandroupoli.py       # Alexandroupoli 2023, Greece (EMSR689)
+    ├── validate_lahaina.py              # Lahaina 2023, USA (NFPA 2024)
+    ├── validate_black_saturday.py       # Black Saturday 2009, Australia (Teague 2010)
+    ├── validate_tubbs.py                # Tubbs Fire 2017, USA (CAL FIRE 2018)
+    ├── validate_peloponnese.py          # Peloponnese 2007, Greece (Koutsias et al. 2012)
+    ├── validate_valparaiso.py           # Valparaíso 2014, Chile (Encinas et al. 2015)
+    ├── validate_all_incidents.py        # All 32 incidents combined (20 runs each)
+    ├── run_incremental_validation.py    # Leave-one-incident-out incremental validation
+    │
+    ├── # Sensitivity, ablation, benchmarks
+    ├── run_sensitivity.py               # Sobol global sensitivity analysis (Saltelli 2010)
+    ├── run_ablation.py                  # Ablation study: CNP + panic model contribution
+    ├── compare_marl_vs_baseline.py      # MARL vs rule-based BDI (Wilcoxon signed-rank)
+    ├── benchmark_runtime.py             # Wall-clock runtime benchmark (32 scenarios)
+    │
+    ├── # Thesis diagram generators
+    ├── plot_dataset_diversity.py        # Fig 5.1 — 32-scenario dataset diversity chart
+    ├── plot_scenario_map.py             # Fig 5.2 — geographic scenario map
+    ├── plot_civilian_fsm.py             # Fig 3.2 — civilian FSM state diagram
+    ├── plot_agent_comms.py              # Fig 3.3 — agent communication topology
+    ├── plot_marl_convergence.py         # Fig 6.7 — MARL training convergence curves
+    └── plot_dataset_analysis.py         # Exploratory dataset analysis plots
 │
 ├── requirements.txt
 ├── README.md

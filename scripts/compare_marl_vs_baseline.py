@@ -55,6 +55,8 @@ Outputs
   CSV  : per-scenario delta (MARL − baseline) with W, p-value, effect size r
   PNG  : grouped bar chart — mortality and evacuation rate by scenario and policy
 """
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent.parent))
 from __future__ import annotations
 import argparse
 import warnings

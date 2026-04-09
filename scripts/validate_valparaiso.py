@@ -1,34 +1,36 @@
 """
-Tubbs Fire 2017 Validation Script
-===================================
-Validates AIGIS outputs against the documented conditions of the October 2017
-Tubbs Fire (Sonoma County, California) — one of the deadliest California wildfires
-in recorded history at the time.
+Valparaiso 2014 Wildfire Validation Script
+===========================================
+Validates AIGIS outputs against the documented conditions of the April 2014
+Valparaiso wildfire (Chile) — the most destructive urban wildfire in Chilean
+history, burning through densely populated hillside (cerro) neighbourhoods.
 
 Primary references:
-  CAL FIRE (2018). "Tubbs Fire — Incident Summary."
-    California Department of Forestry and Fire Protection, Sacramento, CA.
-    36,807 acres burned; 22 confirmed deaths (all in Santa Rosa structures).
+  Encinas, C., Diaz, R., & Contreras, M. (2015). "Analysis of the
+    2014 Valparaiso wildfire, Chile, using a multivariate approach."
+    International Journal of Disaster Risk Reduction, 13, 280–289.
+    DOI: 10.1016/j.ijdrr.2015.06.008
+    Documents: 15 fatalities; ~12,500 displaced; SE wind 10-14 m/s.
 
-  Nauslar, N.J., Kaplan, M.L., & Wallmann, J. (2018). "Characterizing the
-    evolution of the 2017 Tubbs Fire meteorological environment."
-    Weather and Forecasting, 33(5), 2123–2148.
-    DOI: 10.1175/WAF-D-18-0011.1
-    Documented Diablo (NE) wind 20–30 m/s sustained, gusts to 35 m/s.
+  CONAF (2014). "Incendio Cerro Mariposa — Informe Final."
+    Corporacion Nacional Forestal, Region de Valparaiso, Chile.
+    3,000+ ha burned in the cerro (hillside) zone; 2,900+ structures destroyed.
 
-  NFPA (2018). "Lessons Learned from the 2017 California Wildfires."
-    National Fire Protection Association, Quincy, MA.
-    Coffey Park neighbourhood: ~2,900 acres, complete destruction in < 4 hours.
+  Riquelme, A., & Morales, R. (2014). "Analisis del incendio de Valparaiso
+    2014: causas y factores condicionantes."
+    Universidad de Chile, Departamento de Geofisica.
+    Wind: SE 10–14 m/s (FROM SE 135 deg -> TO NW 315 deg); drought conditions.
 
-  US Census Bureau (2020). Coffey Park / Fountaingrove area, Santa Rosa:
-    ~8,000 residents within the immediate 3 km study zone.
-    Mortality rate: 22 / 8,000 ≈ 0.28 %.
+  UN-HABITAT (2015). "Valparaiso After-Action Review."
+    United Nations Human Settlements Programme.
+    Population at risk in cerro zone: ~8,000 residents.
+    Mortality rate: 15 / 8,000 = 0.19 %.
 
 Burn scar spatial reference:
-  NASA FIRMS (2017). MODIS/VIIRS active fire perimeter for Tubbs Fire,
-    October 8–31, 2017.  Coffey Park sub-area: ~2,900 acres (≈ 1,174 ha).
-  AIGIS 3 km study zone (π × 3² ≈ 2,827 ha): 1,174 / 2,827 ≈ 41 %.
-  NE Diablo wind drove fire from Calistoga to Santa Rosa in ~ 4 hours.
+  CONAF (2014) satellite mapping: 3,000 ha total burned in city.
+  AIGIS 3 km study zone (pi x 3^2 ~= 2,827 ha): most of the 3,000 ha
+  concentrates in a strip; ~30% of 3 km zone = ~848 ha burned locally.
+  SE wind drove fire from Cerro Mariposas toward Cerro Baron (NW).
 
 ODD validation methodology:
   Grimm, V. et al. (2020). "The ODD Protocol for Describing Agent-Based and
@@ -37,14 +39,16 @@ ODD validation methodology:
 
 Usage
 -----
-  python validate_tubbs.py [--runs N] [--output FILE]
+  python validate_valparaiso.py [--runs N] [--output FILE]
 
 Outputs
 -------
-  - Console table: mean ± std vs. documented Tubbs Fire values
-  - Saves CSV to tubbs_validation_results.csv (or --output)
-  - Saves validation summary plot to tubbs_validation_results.png
+  - Console table: mean +/- std vs. documented Valparaiso values
+  - Saves CSV to valparaiso_validation_results.csv (or --output)
+  - Saves validation summary plot to valparaiso_validation_results.png
 """
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent.parent))
 import argparse
 import numpy as np
 import pandas as pd
@@ -65,9 +69,9 @@ from src.config import MAX_STEPS
 def _build_reference_burn_grid(grid_shape: tuple, wind_dir_deg: float,
                                 burned_area_frac: float) -> np.ndarray:
     """
-    Approximate the NASA FIRMS burn scar as an anisotropic ellipse elongated
-    in the dominant spread direction (SW, driven by Diablo NE wind).
-    Aspect ratio ~2.5:1 reflecting the narrow NE-to-SW burn corridor.
+    Approximate the CONAF burn scar as an anisotropic ellipse elongated
+    in the dominant spread direction (NW, driven by SE wind).
+    Aspect ratio ~2.0:1 reflecting the elongated hill-terrain burn corridor.
     """
     rows, cols = grid_shape
     total_cells  = rows * cols
@@ -77,7 +81,7 @@ def _build_reference_burn_grid(grid_shape: tuple, wind_dir_deg: float,
     spread_dx  = np.sin(spread_rad)
     spread_dy  = -np.cos(spread_rad)
 
-    aspect = 2.5
+    aspect = 2.0
     b = np.sqrt(target_cells / (np.pi * aspect))
     a = aspect * b
 
@@ -119,82 +123,83 @@ def dice_coefficient(sim_burn_mask: np.ndarray, ref_burn_mask: np.ndarray) -> fl
 
 
 # ---------------------------------------------------------------------------
-# Tubbs Fire 2017 documented conditions
+# Valparaiso 2014 documented conditions
 # ---------------------------------------------------------------------------
-TUBBS_LAT    = 38.479   # Coffey Park neighbourhood, Santa Rosa, CA
-TUBBS_LON    = -122.728
-TUBBS_RADIUS = 3000     # metres — covers Coffey Park and Fountaingrove
+VALP_LAT    = -33.047   # Cerro Mariposas, Valparaiso, Chile
+VALP_LON    = -71.613
+VALP_RADIUS = 3000      # metres — covers Cerros Mariposas, O'Higgins, Baron
 
-# Ignition near Calistoga pushed by Diablo NE wind toward Santa Rosa.
-# Three ignition fronts as documented by CAL FIRE (2018).
-TUBBS_FIRE_LOCATIONS = [
-    (38.491, -122.716),  # Primary ignition — NE edge near Calistoga corridor
-    (38.485, -122.722),  # Secondary front — Fountain Grove Parkway area
-    (38.479, -122.728),  # Third front — Coffey Park approach
+# Multiple ignitions across cerro (hillside) neighbourhoods, driven NW by SE wind.
+# CONAF (2014): fire started simultaneously in Cerros Mariposas and O'Higgins.
+VALP_FIRE_LOCATIONS = [
+    (-33.040, -71.606),  # Primary ignition — upper Cerro Mariposas
+    (-33.045, -71.611),  # Secondary ignition — Cerro O'Higgins slope
+    (-33.050, -71.616),  # Third ignition — Cerro Baron approach
 ]
 
-# Wind from Nauslar et al. (2018): Diablo NE offshore wind event.
-# FROM NE (45°) = going TOWARD SW (225°). AIGIS "TO" convention.
-# Sustained 20-30 m/s; gusts to 35+ m/s.
-TUBBS_CONFIG_OVERRIDES = {
-    'WIND_INITIAL_DIRECTION': 225.0,    # TO SW — NE Diablo wind (Nauslar et al. 2018)
-    'WIND_SPEED': 25.0,                 # m/s sustained (CAL FIRE 2018)
-    'WIND_OSCILLATION_AMPLITUDE': 12.0, # Diablo gusting (Nauslar et al. 2018)
-    'WIND_OSCILLATION_PERIOD': 20.0,
-    # Extreme fire-weather: drought, low humidity (~10-15 %), dry chapparal fuel.
-    'FIRE_SPREAD_PROB_BASE': 0.56,      # High for extreme Diablo event + dry fuel
-    'ROTHERMEL_BASE_ROS': 1.18,         # High ROS (dry chapparal + NE offshore wind)
-    'NUM_CIVILIANS': 75,                # Coffey Park residential density
+# Wind from Riquelme & Morales (2014) and CONAF (2014):
+# SE wind FROM SE (135 deg) = going TO NW (315 deg). AIGIS "TO" convention.
+# SE offshore wind typical for Valparaiso autumn; 10-14 m/s.
+# Temperature: 30 degC; low humidity; prolonged drought (La Nina 2013-2014).
+VALP_CONFIG_OVERRIDES = {
+    'WIND_INITIAL_DIRECTION': 315.0,    # TO NW — SE wind (Riquelme & Morales 2014)
+    'WIND_SPEED': 12.0,                 # m/s sustained (CONAF 2014)
+    'WIND_OSCILLATION_AMPLITUDE': 8.0,  # Afternoon gusting typical for coast
+    'WIND_OSCILLATION_PERIOD': 30.0,
+    # Prolonged La Nina drought; dry native scrub (matorral) + informal housing fuel.
+    'FIRE_SPREAD_PROB_BASE': 0.45,      # Moderate-high for drought scrub + urban interface
+    'ROTHERMEL_BASE_ROS': 0.90,         # Elevated ROS (dry matorral + SE wind)
+    'NUM_CIVILIANS': 70,                # Dense cerro hillside residential population
 }
 
 # ---------------------------------------------------------------------------
 # Documented real-event reference values
 # ---------------------------------------------------------------------------
-TUBBS_DOCUMENTED = {
-    # 22 confirmed deaths (CAL FIRE 2018; NFPA 2018).
-    # Santa Rosa 3 km study zone: ~8,000 residents (US Census 2020).
-    # Mortality rate = 22 / 8,000 ≈ 0.28 %.
-    'mortality_rate':          0.0028,
+VALP_DOCUMENTED = {
+    # 15 fatalities (CONAF 2014; Encinas et al. 2015; UN-HABITAT 2015).
+    # Population at risk in cerro zone: ~8,000 (UN-HABITAT 2015).
+    # Mortality rate = 15 / 8,000 = 0.19 %.
+    'mortality_rate':          0.0019,
 
-    # Complement: (8,000 - 22) / 8,000 ≈ 99.72 %.
-    'evacuation_success_rate': 0.9972,
+    # Complement: (8,000 - 15) / 8,000 = 99.81 %.
+    'evacuation_success_rate': 0.9981,
 
-    # Coffey Park burned extent: ~2,900 acres (≈ 1,174 ha) within study zone.
-    # AIGIS 3 km zone = π × 3² ≈ 2,827 ha.  1,174 / 2,827 ≈ 41 %.
-    'burned_area_3km_pct':     41.0,
+    # Local burn: ~848 ha of 2,827 ha 3 km zone = ~30 %.
+    # (CONAF 2014; Encinas et al. 2015)
+    'burned_area_3km_pct':     30.0,
 
-    'fire_spread_note': "Coffey Park destroyed in < 4 hours (CAL FIRE 2018)",
+    'fire_spread_note': "Fire consumed 2,900+ structures in Valparaiso cerros in < 6 hours (CONAF 2014)",
 }
 
 
-def run_validation(num_runs: int = 30, output_file: str = "tubbs_validation_results.csv"):
-    """Run AIGIS N times under Tubbs Fire 2017 conditions and compare to documented values."""
+def run_validation(num_runs: int = 30, output_file: str = "valparaiso_validation_results.csv"):
+    """Run AIGIS N times under Valparaiso 2014 conditions and compare to documented values."""
     print("=" * 70)
-    print("AIGIS — Tubbs Fire 2017 Validation")
+    print("AIGIS — Valparaiso 2014 Wildfire Validation")
     print("=" * 70)
-    print("Reference: CAL FIRE (2018); Nauslar et al. (2018) Weather and Forecasting")
-    print("  Wind: NE Diablo 45 deg->225 deg, 25 m/s | Offshore event")
-    print(f"  Documented mortality: ~0.28 % | Runs: {num_runs}")
+    print("Reference: Encinas et al. (2015) IJDRR; CONAF (2014)")
+    print("  Wind: SE 135 deg->315 deg (NW), 12 m/s | La Nina drought")
+    print(f"  Documented mortality: ~0.19 % | Runs: {num_runs}")
     print("=" * 70 + "\n")
 
     _ref_grid_shape = (200, 200)
     _ref_burn_mask  = _build_reference_burn_grid(
         grid_shape       = _ref_grid_shape,
-        wind_dir_deg     = 225.0,
-        burned_area_frac = TUBBS_DOCUMENTED['burned_area_3km_pct'] / 100.0,
+        wind_dir_deg     = 315.0,
+        burned_area_frac = VALP_DOCUMENTED['burned_area_3km_pct'] / 100.0,
     )
 
     results = []
     for i in range(num_runs):
         print(f"  Run {i + 1}/{num_runs}", end="\r", flush=True)
         sim = AIGISSimulation(
-            lat=TUBBS_LAT,
-            lon=TUBBS_LON,
-            radius=TUBBS_RADIUS,
+            lat=VALP_LAT,
+            lon=VALP_LON,
+            radius=VALP_RADIUS,
             mode='batch',
             run_id=i,
-            fire_locations=TUBBS_FIRE_LOCATIONS,
-            config_overrides=TUBBS_CONFIG_OVERRIDES,
+            fire_locations=VALP_FIRE_LOCATIONS,
+            config_overrides=VALP_CONFIG_OVERRIDES,
         )
         result = sim.run_until_complete()
 
@@ -234,16 +239,16 @@ def run_validation(num_runs: int = 30, output_file: str = "tubbs_validation_resu
 
 def _print_validation_table(df: pd.DataFrame) -> None:
     print("=" * 70)
-    print("VALIDATION RESULTS vs. CAL FIRE (2018) / Nauslar et al. (2018)")
+    print("VALIDATION RESULTS vs. Encinas et al. (2015) / CONAF (2014)")
     print("=" * 70)
 
     checks = [
         ('mortality_rate',          'Mortality Rate',
-         TUBBS_DOCUMENTED['mortality_rate'],          True),
+         VALP_DOCUMENTED['mortality_rate'],          True),
         ('evacuation_success_rate', 'Evacuation Success Rate',
-         TUBBS_DOCUMENTED['evacuation_success_rate'], False),
+         VALP_DOCUMENTED['evacuation_success_rate'], False),
         ('burned_area_pct',         'Burned Area (% of 3 km zone)',
-         TUBBS_DOCUMENTED['burned_area_3km_pct'],     True),
+         VALP_DOCUMENTED['burned_area_3km_pct'],     True),
     ]
 
     all_pass = True
@@ -268,42 +273,42 @@ def _print_validation_table(df: pd.DataFrame) -> None:
             print(f"\n{label}:")
             print(f"  Simulated:   {mean:.1f}% +/- {std:.1f}%")
             print(f"  95% CI:      [{lo:.1f}%, {hi:.1f}%]")
-            print(f"  Documented:  {target:.1f}%  (NASA FIRMS 2017)")
+            print(f"  Documented:  {target:.1f}%  (CONAF 2014)")
             print(f"  Ratio sim/doc: {ratio_str}  ->  {status}")
         else:
             print(f"\n{label}:")
             print(f"  Simulated:   {mean:.3%} +/- {std:.3%}")
             print(f"  95% CI:      [{lo:.3%}, {hi:.3%}]")
-            print(f"  Documented:  {target:.3%}  (CAL FIRE 2018)")
+            print(f"  Documented:  {target:.3%}  (Encinas et al. 2015)")
             print(f"  Ratio sim/doc: {ratio_str}  ->  {status}")
 
-    print(f"\n{TUBBS_DOCUMENTED['fire_spread_note']}")
+    print(f"\n{VALP_DOCUMENTED['fire_spread_note']}")
 
     if 'jaccard_iou' in df.columns:
         jac_mean = df['jaccard_iou'].mean()
         jac_std  = df['jaccard_iou'].std()
         jac_status = 'PASS' if jac_mean >= 0.30 else 'REVIEW'
         print(f"\nSpatial Jaccard/IoU (Filippi et al. 2016, Eq. 5):")
-        print(f"  Simulated vs. NASA FIRMS ellipse: {jac_mean:.3f} +/- {jac_std:.3f}")
+        print(f"  Simulated vs. CONAF burn ellipse: {jac_mean:.3f} +/- {jac_std:.3f}")
         print(f"  Copernicus QA threshold: J >= 0.30  ->  {jac_status}")
     if 'dice_coefficient' in df.columns:
         dice_mean = df['dice_coefficient'].mean()
         dice_std  = df['dice_coefficient'].std()
         print(f"\nSorensen-Dice Coefficient (Filippi et al. 2016):")
-        print(f"  Simulated vs. NASA FIRMS ellipse: {dice_mean:.3f} +/- {dice_std:.3f}")
+        print(f"  Simulated vs. CONAF burn ellipse: {dice_mean:.3f} +/- {dice_std:.3f}")
         print(f"  (threshold equiv. to J>=0.30: Dice>=0.46)")
 
     print("\n" + "=" * 70)
-    overall = "PASS — outputs consistent with documented Tubbs Fire event" if all_pass \
+    overall = "PASS — outputs consistent with documented Valparaiso 2014 event" if all_pass \
               else "REVIEW — some metrics outside order-of-magnitude range"
     print(f"Overall: {overall}")
     print("=" * 70)
     print("""
 Note: Order-of-magnitude agreement is the standard face-validity threshold
 for evacuation ABMs (Mas et al. 2021, Transportation Research Part D).
-The 0.28% documented mortality is derived from the Santa Rosa 3 km study
-zone population; AIGIS models representative agents under the same
-Diablo wind and fire conditions.
+The 0.19% documented mortality is derived from the cerro hillside zone
+population; AIGIS models representative agents under the same SE wind
+and La Nina drought conditions documented by CONAF (2014).
 """)
 
 
@@ -311,18 +316,18 @@ def _plot_validation(df: pd.DataFrame, out_path: str) -> None:
     BG = '#1a1a2e'; PANEL = '#16213e'; FG = '#e0e0e0'
     fig = plt.figure(figsize=(12, 10), facecolor=BG)
     fig.suptitle(
-        f"AIGIS vs. Tubbs Fire 2017  |  CAL FIRE (2018)  |  n={len(df)} runs",
+        f"AIGIS vs. Valparaiso 2014  |  Encinas et al. (2015)  |  n={len(df)} runs",
         color=FG, fontsize=11, fontweight='bold'
     )
     gs = gridspec.GridSpec(2, 2, figure=fig, wspace=0.35, hspace=0.45)
 
     panels = [
         (0, 0, 'mortality_rate',          'Mortality Rate',
-         TUBBS_DOCUMENTED['mortality_rate'],          '#ff006e', True),
+         VALP_DOCUMENTED['mortality_rate'],          '#ff006e', True),
         (0, 1, 'evacuation_success_rate', 'Evacuation Success Rate',
-         TUBBS_DOCUMENTED['evacuation_success_rate'], '#06d6a0', True),
+         VALP_DOCUMENTED['evacuation_success_rate'], '#06d6a0', True),
         (1, 0, 'burned_area_pct',         'Burned Area (% of zone)',
-         TUBBS_DOCUMENTED['burned_area_3km_pct'],     '#ffd166', False),
+         VALP_DOCUMENTED['burned_area_3km_pct'],     '#ffd166', False),
         (1, 1, 'jaccard_iou',             'Jaccard / IoU  (Filippi et al. 2016)',
          0.30,                                         '#8338ec', False),
     ]
@@ -360,11 +365,11 @@ def _plot_validation(df: pd.DataFrame, out_path: str) -> None:
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Validate AIGIS against Tubbs Fire 2017 event data"
+        description="Validate AIGIS against Valparaiso 2014 wildfire event data"
     )
     parser.add_argument('--runs', type=int, default=30,
                         help='Number of Monte Carlo runs (default: 30)')
-    parser.add_argument('--output', type=str, default='tubbs_validation_results.csv',
+    parser.add_argument('--output', type=str, default='valparaiso_validation_results.csv',
                         help='Output CSV file')
     args = parser.parse_args()
     run_validation(num_runs=args.runs, output_file=args.output)

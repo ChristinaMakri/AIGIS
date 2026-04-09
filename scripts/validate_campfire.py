@@ -45,6 +45,8 @@ Outputs
   - Saves CSV to campfire_validation_results.csv (or --output)
   - Saves validation summary plot to campfire_validation.png
 """
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent.parent))
 import argparse
 import numpy as np
 import pandas as pd

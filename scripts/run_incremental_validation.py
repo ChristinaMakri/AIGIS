@@ -37,6 +37,8 @@ Outputs
   incremental_validation_results.csv — metric evolution across incidents
   incremental_validation_plot.png    — line plots of metric trajectories
 """
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent.parent))
 from __future__ import annotations
 import argparse
 import copy

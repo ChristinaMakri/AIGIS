@@ -9,6 +9,8 @@ Also produces a Mediterranean inset: scenario_map_mediterranean.png
 
 Output: scenario_map.png, scenario_map_mediterranean.png
 """
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent.parent))
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt

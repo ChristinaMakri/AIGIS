@@ -43,6 +43,8 @@ Outputs
   - Saves CSV to mati_validation_results.csv (or --output)
   - Saves validation summary plot to mati_validation.png
 """
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent.parent))
 import argparse
 import sys
 import numpy as np

@@ -57,6 +57,8 @@ Outputs
   CSV : per-scenario median time (s), std, CV, agent count, grid size
   PNG : horizontal bar chart sorted by median runtime
 """
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent.parent))
 from __future__ import annotations
 import argparse
 import contextlib

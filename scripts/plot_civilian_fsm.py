@@ -8,6 +8,8 @@ Three-layer diagram:
 
 Output: civilian_fsm.png
 """
+import sys as _sys, pathlib as _pathlib
+_sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent.parent))
 import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
