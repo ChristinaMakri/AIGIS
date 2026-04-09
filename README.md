@@ -370,29 +370,6 @@ See [DOCKER.md](DOCKER.md) for details.
 
 ---
 
-## Full Bibliography
-
-1. Rothermel, R.C. (1972). *A Mathematical Model for Predicting Fire Spread in Wildland Fuels*. USDA Forest Service Research Paper INT-115.
-2. Anderson, H.E. (1982). *Aids to Determining Fuel Models for Estimating Fire Behavior*. USDA Forest Service GTR INT-122.
-3. Van Wagner, C.E. (1987). *Development and Structure of the Canadian Forest Fire Weather Index System*. Forestry Technical Report 35.
-4. Van Wagner, C.E. & Pickett, T.L. (1985). *Equations and FORTRAN Program for the Canadian Forest Fire Weather Index System*. Forestry Technical Report 33.
-5. Schroeder, W. et al. (2014). "The New VIIRS 375 m active fire detection data product." *Remote Sensing of Environment*, 143, pp. 85–96.
-6. Inness, A. et al. (2019). "The CAMS reanalysis of atmospheric composition." *Atmos. Chem. Phys.*, 19(6), pp. 3515–3556.
-7. Green, D.M. & Swets, J.A. (1966). *Signal Detection Theory and Psychophysics*. Wiley.
-8. Rao, A.S. & Georgeff, M.P. (1995). "BDI agents: From theory to practice." *ICMAS-95*, pp. 312–319.
-9. Smith, R.G. (1980). "The Contract Net Protocol." *IEEE Trans. Computers*, C-29(12), pp. 1104–1113.
-10. Greenshields, B.D. et al. (1935). "A study of traffic capacity." *Highway Research Board Proceedings*, 14, pp. 448–477.
-11. Cova, T.J. & Johnson, J.P. (2002). "Microsimulation of neighborhood evacuations in the urban-wildland interface." *Environment and Planning A*, 34(12), pp. 2211–2230.
-12. Wolshon, B. (2006). "Evacuation planning and engineering for Hurricane Katrina." *The Bridge*, 36(1), pp. 27–34.
-13. Lagouvardos, K. et al. (2019). "Meteorological analysis of the catastrophic wildfire in Mati, eastern Attica, Greece." *BAMS*, 100(11), pp. 2243–2257.
-14. Schulman, J., Wolski, F., Dhariwal, P., Radford, A. & Klimov, O. (2017). "Proximal Policy Optimization Algorithms." *arXiv:1707.06347*.
-15. Bengio, Y., Louradour, J., Collobert, R. & Weston, J. (2009). "Curriculum Learning." *ICML-09*, pp. 41–48.
-16. Lowe, R. et al. (2017). "Multi-Agent Actor-Critic for Mixed Cooperative-Competitive Environments." *NIPS*, pp. 6379–6390.
-17. Mas, E. et al. (2021). "An interdisciplinary agent-based multimodal wildfire evacuation model." *Transportation Research Part D*, 99, 103007.
-18. Mann, H.B. & Whitney, D.R. (1947). "On a Test of Whether One of Two Random Variables is Stochastically Larger than the Other." *Annals of Mathematical Statistics*, 18(1), pp. 50–60.
-
----
-
 ## License
 
 MIT License
