@@ -1,4 +1,4 @@
-# AIGIS: AI for Guardian & Intervention Systems
+# AIGIS: Adaptive Intelligence for Geospatial Incident Simulation
 
 A Multi-Agent System (MAS) for wildfire disaster management simulation. AIGIS creates a Digital Twin of any geographic area using live OpenStreetMap data and simulates the interaction between 8 distinct types of intelligent agents under crisis conditions.
 
@@ -428,7 +428,7 @@ MIT License
 
 If you use AIGIS in your research:
 ```
-AIGIS: AI for Guardian & Intervention Systems
+AIGIS: Adaptive Intelligence for Geospatial Incident Simulation
 Multi-Agent Wildfire Evacuation Simulation
 https://github.com/ChristinaMakri/AIGIS
 ```

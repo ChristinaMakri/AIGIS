@@ -1,5 +1,5 @@
 """
-AIGIS - AI for Guardian & Intervention Systems
+AIGIS - Adaptive Intelligence for Geospatial Incident Simulation
 Multi-Agent Wildfire Evacuation Simulation
 
 CLI Interface supporting:
@@ -511,7 +511,7 @@ Examples:
 
     # Print header
     print("\n" + "=" * 70)
-    print("🛡️  AIGIS: AI for Guardian & Intervention Systems")
+    print("🛡️  AIGIS: Adaptive Intelligence for Geospatial Incident Simulation")
     print("    Multi-Agent Wildfire Evacuation Simulation")
     print("=" * 70 + "\n")
 

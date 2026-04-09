@@ -2,7 +2,7 @@
 
 # AIGIS Simulation Runner Script
 
-echo "🛡️  AIGIS: AI for Guardian & Intervention Systems"
+echo "🛡️  AIGIS: Adaptive Intelligence for Geospatial Incident Simulation"
 echo "=================================================="
 echo ""
 
