@@ -418,7 +418,7 @@ def plot_diversity(output_file: str = 'dataset_diversity.png') -> None:
         labels=wedge_labels,
         colors=cont_cols,
         startangle=90,
-        wedgeprops=dict(width=0.55, edgecolor='#1a1a2e', linewidth=1.2),
+        wedgeprops=dict(width=0.55, edgecolor='white', linewidth=1.2),
         textprops=dict(color=FG, fontsize=8),
         autopct='%1.0f%%',
         pctdistance=0.75,
