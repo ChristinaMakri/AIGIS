@@ -26,11 +26,10 @@ Indices computed
 Sample generation (Saltelli sampler)
 --------------------------------------
 N × (2D + 2) model evaluations where N is the base sample size and D is
-the number of parameters.  N = 128 gives 128 × (2×6 + 2) = 1792 evaluations.
-This satisfies the minimum N ≥ 100/D rule for reliable Si estimates
-(Saltelli et al. 2010, Section 3.2: N ≥ 500 for D = 6 → use N=128 here
-as a practical default for the per-run Monte Carlo; increase N for final
-thesis runs).
+the number of parameters.  N = 512 gives 512 × (2×6 + 2) = 7168 evaluations,
+which satisfies the N ≥ 500 recommendation for D = 6 parameters
+(Saltelli et al. 2010, Section 3.2).  Pass --workers <cpu_count> to
+parallelise across cores and reduce wall-clock time proportionally.
 
 Parameters analysed
 -------------------
@@ -64,7 +63,9 @@ Outputs
 import sys as _sys, pathlib as _pathlib
 _sys.path.insert(0, str(_pathlib.Path(__file__).resolve().parent.parent))
 import argparse
+import os
 import warnings
+from multiprocessing import Pool
 import numpy as np
 import pandas as pd
 import matplotlib
@@ -76,7 +77,6 @@ from SALib.sample import saltelli
 from SALib.analyze import sobol
 
 import src.config as _cfg
-from src.simulation import AIGISSimulation
 
 warnings.filterwarnings('ignore')
 
@@ -123,21 +123,32 @@ BG, PANEL, FG = 'white', '#f5f5f5', '#222222'
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _apply_sample(sample_row: np.ndarray) -> None:
-    """Patch src.config with values from one Saltelli sample row."""
-    names = PROBLEM['names']
-    for i, name in enumerate(names):
+def _worker(args: tuple) -> tuple:
+    """
+    Self-contained worker for parallel execution.
+
+    Each subprocess (fork or spawn) gets its own copy of src.config, so
+    patching it here is safe — no shared state with other workers.
+
+    Args:
+        args: (sample_row, lat, lon, radius, run_id)
+
+    Returns:
+        (run_id, {output_name: value, ...})
+    """
+    sample_row, lat, lon, radius, run_id = args
+    import src.config as _local_cfg
+    from src.simulation import AIGISSimulation
+
+    for i, name in enumerate(PROBLEM['names']):
         val = sample_row[i]
         if name == 'NUM_CIVILIANS':
             val = int(round(val))
-        setattr(_cfg, name, val)
+        setattr(_local_cfg, name, val)
 
-
-def _run_one(lat: float, lon: float, radius: int, run_id: int) -> dict:
-    """Single simulation run; returns dict of output values."""
     sim = AIGISSimulation(lat=lat, lon=lon, radius=radius, mode='batch', run_id=run_id)
     result = sim.run_until_complete()
-    return {k: result[k] for k in OUTPUTS}
+    return run_id, {k: result[k] for k in OUTPUTS}
 
 
 # ---------------------------------------------------------------------------
@@ -145,26 +156,29 @@ def _run_one(lat: float, lon: float, radius: int, run_id: int) -> dict:
 # ---------------------------------------------------------------------------
 
 def run_sensitivity(
-    N:           int   = 128,
+    N:           int   = 512,
     lat:         float = 38.090,
     lon:         float = 23.920,
     radius:      int   = 3000,
     output_file: str   = 'sensitivity_results.csv',
+    workers:     int   = 1,
 ) -> pd.DataFrame:
     """
     Execute Sobol global sensitivity analysis.
 
     Steps (Saltelli et al. 2010):
       1. Generate Saltelli sample matrix  (N*(2D+2) rows)
-      2. Evaluate model at each sample point
+      2. Evaluate model at each sample point (parallel if workers > 1)
       3. Compute Sobol Si and STi for each (parameter, output) pair
       4. Report and plot results
 
     Args:
-        N:           base sample size (Saltelli et al. 2010 recommend N >= 100)
+        N:           base sample size (Saltelli et al. 2010 recommend N >= 500
+                     for D = 6 parameters)
         lat, lon:    simulation centre (default: Mati, Greece)
         radius:      map radius in metres
         output_file: CSV output path
+        workers:     number of parallel worker processes (default 1 = serial)
     """
     n_params = PROBLEM['num_vars']
     total_runs = N * (2 * n_params + 2)
@@ -174,7 +188,7 @@ def run_sensitivity(
     print('=' * 70)
     print('Saltelli, A. et al. (2010) variance-based estimator.')
     print('Grimm et al. (2020) ODD §7.6 — recommended for nonlinear ABMs.')
-    print(f'N = {N}  |  D = {n_params}  |  Total model runs = {total_runs}')
+    print(f'N = {N}  |  D = {n_params}  |  Total model runs = {total_runs}  |  Workers = {workers}')
     print('=' * 70 + '\n')
 
     # ---- Step 1: Saltelli sample matrix -----------------------------------
@@ -184,15 +198,30 @@ def run_sensitivity(
     # shape: (N*(2D+2), D)
 
     # ---- Step 2: Model evaluations ----------------------------------------
-    Y = {out: np.zeros(len(param_values)) for out in OUTPUTS}
+    args_list = [
+        (param_values[i], lat, lon, radius, i)
+        for i in range(len(param_values))
+    ]
 
-    for i, sample in enumerate(param_values):
-        if (i + 1) % 50 == 0 or i == 0:
-            print(f'  Run {i + 1}/{total_runs}', end='\r', flush=True)
-        _apply_sample(sample)
-        res = _run_one(lat, lon, radius, run_id=i)
-        for out in OUTPUTS:
-            Y[out][i] = res[out]
+    Y = {out: np.zeros(len(param_values)) for out in OUTPUTS}
+    completed = 0
+
+    if workers > 1:
+        with Pool(processes=workers) as pool:
+            for run_id, res in pool.imap_unordered(_worker, args_list):
+                completed += 1
+                if completed % 50 == 0 or completed == 1:
+                    print(f'  Run {completed}/{total_runs}', end='\r', flush=True)
+                for out in OUTPUTS:
+                    Y[out][run_id] = res[out]
+    else:
+        for run_id, res in (_worker(a) for a in args_list):
+            completed += 1
+            if completed % 50 == 0 or completed == 1:
+                print(f'  Run {completed}/{total_runs}', end='\r', flush=True)
+            for out in OUTPUTS:
+                Y[out][run_id] = res[out]
+
     print(f'  Run {total_runs}/{total_runs} — done.              ')
 
     # ---- Step 3: Sobol analysis -------------------------------------------
@@ -313,19 +342,22 @@ def main():
     parser = argparse.ArgumentParser(
         description='Sobol global sensitivity analysis for AIGIS'
     )
-    parser.add_argument('--N',      type=int,   default=128,
-                        help='Saltelli base sample size N (total runs = N*(2D+2), default 128)')
-    parser.add_argument('--output', type=str,   default='sensitivity_results.csv',
+    parser.add_argument('--N',       type=int,   default=512,
+                        help='Saltelli base sample size N (total runs = N*(2D+2), default 512)')
+    parser.add_argument('--output',  type=str,   default='sensitivity_results.csv',
                         help='Output CSV filename')
-    parser.add_argument('--lat',    type=float, default=38.090)
-    parser.add_argument('--lon',    type=float, default=23.920)
-    parser.add_argument('--radius', type=int,   default=3000)
+    parser.add_argument('--lat',     type=float, default=38.090)
+    parser.add_argument('--lon',     type=float, default=23.920)
+    parser.add_argument('--radius',  type=int,   default=3000)
+    parser.add_argument('--workers', type=int,   default=os.cpu_count(),
+                        help='Parallel worker processes (default: all CPU cores)')
     args = parser.parse_args()
 
     run_sensitivity(
         N=args.N,
         lat=args.lat, lon=args.lon, radius=args.radius,
         output_file=args.output,
+        workers=args.workers,
     )
 
 
